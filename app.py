@@ -1,10 +1,11 @@
 # app.py
 
-from flask import Flask, render_template, request, send_file, redirect, abort
+from flask import Flask, render_template, request, send_file, redirect, abort, Response, stream_with_context
 import io
 import csv
 import pandas as pd
 import json
+import queue, time, uuid
 
 from services.db import load_items
 from services.logic import (
@@ -18,6 +19,48 @@ from services.debug import bp as debug_bp
 
 app = Flask(__name__)
 app.register_blueprint(debug_bp, url_prefix="/debug")
+
+# ---- Real-time broadcaster (SSE) ----
+_subscribers: dict[str, list[queue.Queue]] = {}
+_latest_roll_id: dict[str, str] = {}  # channel -> last id
+
+def _subscribe(channel: str) -> queue.Queue:
+    q = queue.Queue(maxsize=10)
+    _subscribers.setdefault(channel, []).append(q)
+    return q
+
+def _publish(channel: str, roll_id: str):
+    _latest_roll_id[channel] = roll_id
+    for q in _subscribers.get(channel, [])[:]:
+        try:
+            q.put_nowait(roll_id)
+        except Exception:
+            try: _subscribers[channel].remove(q)
+            except ValueError: pass
+
+def _current_roll_id(channel: str) -> str:
+    return _latest_roll_id.get(channel, "")
+
+# ---- Real-time broadcaster (SSE) ----
+_subscribers: dict[str, list[queue.Queue]] = {}
+_latest_roll_id: dict[str, str] = {}  # channel -> last id
+
+def _subscribe(channel: str) -> queue.Queue:
+    q = queue.Queue(maxsize=10)
+    _subscribers.setdefault(channel, []).append(q)
+    return q
+
+def _publish(channel: str, roll_id: str):
+    _latest_roll_id[channel] = roll_id
+    for q in _subscribers.get(channel, [])[:]:
+        try:
+            q.put_nowait(roll_id)
+        except Exception:
+            try: _subscribers[channel].remove(q)
+            except ValueError: pass
+
+def _current_roll_id(channel: str) -> str:
+    return _latest_roll_id.get(channel, "")
 
 # Optional: preserve the existing /health link in index.html
 @app.route("/health")
@@ -268,6 +311,10 @@ def query():
         }
     }
 
+    channel = (request.form.get("channel") or "default").strip().lower()
+    roll_id = uuid.uuid4().hex[:12]
+    _publish(channel, roll_id)
+
     return render_template(
         "results.html",
         shop_type=shop_type,
@@ -284,6 +331,8 @@ def query():
         formula_items = result_formulas.get("items", []),
         aon_url=aon_url,
         snapshot=snapshot,
+        roll_id=roll_id,
+        channel=channel,
     )
 
 
