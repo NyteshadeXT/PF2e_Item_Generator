@@ -95,19 +95,19 @@ def query():
     
     # Helper: unique-by (name, price, rarity, level)
     def _uniq(items):
-        seen, out = set(), []
-        for it in items:
-            key = (
-                (it.get("name") or "").strip(),
-                (it.get("price") or it.get("price_text") or "").strip(),
-                (it.get("rarity") or "").strip(),
-                int(it.get("level") or 0),
-            )
-            if key in seen:
-                continue
-            seen.add(key)
-            out.append(it)
-        return out
+    seen, out = set(), []
+    for it in items or []:
+        key = (
+            _norm_str(it.get("name")),
+            _norm_str(it.get("price") or it.get("price_text")),
+            _norm_str(it.get("rarity")),
+            _to_int(it.get("level")),
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(it)
+    return out
 
     # Runed weapons and armor for counts
     runed_weapons = [w for w in weapon_items if (w.get("category") == "Runed Weapon" or w.get("is_magic_countable"))]
