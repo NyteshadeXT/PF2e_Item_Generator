@@ -1,0 +1,106 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Inventory Generator</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="stylesheet" href="{{ url_for('static', filename='pf2e.css') }}">
+</head>
+<body>
+  <div class="pf-app">
+
+    <!-- Page Header / Title -->
+    <header class="pf-page-header mt-16">
+      <div class="pf-page-header__inner">
+        <div class="pf-page-title">
+          <span class="pf-kicker">Pathfinder 2e Remaster</span>
+          <h1>Item Generator</h1>
+          <p class="pf-subtitle">
+            <span class="pf-chip">Pick options below, then generate</span>
+          </p>
+        </div>
+
+        <nav class="pf-page-actions" aria-label="Primary actions">
+          <a href="/health" class="pf-link-chip">Health</a>
+          <!-- Submit the form from the header via the 'form' attribute -->
+          <button class="pf-link-chip" type="submit" form="generatorForm">Open Results</button>
+        </nav>
+      </div>
+    </header>
+
+    <!-- Form Card -->
+    <section class="pf-card mt-16">
+      <div class="pf-section__header"><h2 style="margin:0;">Generate Inventory</h2></div>
+      <div class="p-12">
+
+        <form id="generatorForm" class="pf-form-grid" action="{{ url_for('query') }}" method="post">
+
+          <!-- Shop Type -->
+          <div class="pf-field">
+            <label for="shop_type" class="pf-label">Shop Type</label>
+            <select id="shop_type" name="shop_type" class="pf-select pf-select-lg">
+              {% set current_shop = (shop_type or 'Any') %}
+              {% for opt in shop_types or ['Any','Blacksmith','Armorer','Leatherworker','General Store','Alchemist'] %}
+                <option value="{{ opt }}" {% if current_shop|lower == opt|lower %}selected{% endif %}>{{ opt }}</option>
+              {% endfor %}
+            </select>
+            <div class="pf-help">Choose the kind of shop to bias inventory.</div>
+          </div>
+
+		  <!-- Shop Size -->
+		  <div class="pf-field">
+			<label for="shop_size" class="pf-label">Shop Size</label>
+			<select id="shop_size" name="shop_size" class="pf-select pf-select-lg">
+			  {% set current_size = (shop_size or 'Medium') %}
+			  {% for opt in ['Small','Medium','Large','Grand'] %}
+				<option value="{{ opt|lower }}" {% if current_size|lower == opt|lower %}selected{% endif %}>{{ opt }}</option>
+			  {% endfor %}
+			</select>
+			<div class="pf-help">Controls stock counts and quantity boosts.</div>
+		  </div>
+
+		  <!-- Disposition (from config.json) -->
+		  <div class="pf-field">
+		    <label for="disposition" class="pf-label">Disposition</label>
+		    <select id="disposition" name="disposition" class="pf-select pf-select-lg">
+			  {% set current_disp = (disposition or 'fair') %}
+			  {% set opts = dispositions or ['fair'] %}
+			  {% for opt in opts %}
+			    <option value="{{ opt|lower }}" {% if current_disp|lower == opt|lower %}selected{% endif %}>
+				  {{ opt.replace('_',' ')|title }}
+			    </option>
+			  {% endfor %}
+		    </select>
+		    <div class="pf-help">Affects per-unit price adjustments.</div>
+		  </div>
+
+          <!-- Party Level -->
+          <div class="pf-field">
+            <label for="party_level" class="pf-label">Party Level</label>
+            <input id="party_level" name="party_level" type="number" min="1" max="25" step="1"
+                   class="pf-input pf-select-lg" value="{{ party_level or 5 }}" />
+            <div class="pf-help">Sets max item level window (e.g., ≤ PL+1 for basics).</div>
+          </div>
+
+          <!-- Actions -->
+          <div class="pf-actions">
+            <button type="submit" class="pf-btn pf-btn-primary">Generate Inventory</button>
+            <button type="reset" class="pf-btn pf-btn-ghost">Reset</button>
+          </div>
+
+        </form>
+
+      </div>
+    </section>
+
+    <!-- Tips Card (optional) -->
+    <section class="pf-card mt-12">
+      <div class="pf-meta">
+        Tip: You can jump straight to a section in results with the quick nav,
+        and use the CSV export to save a copy for your session notes.
+      </div>
+    </section>
+
+  </div><!-- .pf-app -->
+</body>
+</html>

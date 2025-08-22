@@ -1,0 +1,418 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Inventory Results</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="stylesheet" href="{{ url_for('static', filename='pf2e.css') }}">
+</head>
+<body>
+  <div class="pf-app">
+
+    <!-- Page Header / Title -->
+    <header class="pf-page-header mt-16">
+      <div class="pf-page-header__inner">
+        <div class="pf-page-title">
+          <span class="pf-kicker">Pathfinder 2e Remaster</span>
+          <h1>Item Generator</h1>
+          <p class="pf-subtitle">
+            <span class="pf-chip">Shop: {{ (shop_type or "Any") | replace('_',' ') | title }}</span>
+            <span class="pf-chip">Size: {{ shop_size|title }}</span>
+            <span class="pf-chip">Disposition: {{ disposition|title }}</span>
+            <span class="pf-chip">Party Level: {{ party_level }}</span>
+          </p>
+        </div>
+
+        <nav class="pf-page-actions" aria-label="Section navigation">
+          <a href="/" class="pf-link-chip">Back</a>
+          <button class="pf-link-chip" type="button" onclick="exportToCSV()">Export All to CSV</button>
+		  <form id="playerViewForm"
+				method="POST"
+				action="/player-view"
+				target="_blank"
+				rel="noopener"
+				style="display:inline;">
+			<input type="hidden" name="snapshot" value='{{ snapshot | default({}) | tojson }}'>
+			<button type="submit" class="pf-link-chip" formtarget="_blank">Open Player View</button>
+		  </form>
+          <a href="#Mundane" class="pf-link-chip">Mundane</a>
+		  <a href="#Materials" class="pf-link-chip">Materials</a>
+          <a href="#Armor" class="pf-link-chip">Armor</a>
+          <a href="#Weapons" class="pf-link-chip">Weapons</a>
+          <a href="#Magic" class="pf-link-chip">Magic</a>
+        </nav>
+		
+		{# results.html — near your "Open Player View" form #}
+		{% set snapshot = {
+		  "mundane_items":  mundane_items,
+		  "materials_items": material_items,
+		  "armor_items":    armor_items,
+		  "weapons_items":  weapon_items,
+		  "magic_items":    magic_items,
+		  "formula_items":  formula_items
+		} %}
+      </div>
+    </header>
+
+    <!-- Summary card (Picked / Rarity) -->
+    <section class="pf-card mt-12">
+		<div class="pf-meta">
+		  <strong>Picked:</strong>
+		  Mundane {{ picked.mundane|default(0) }},
+		  Materials {{ picked.materials|default(0) }},
+		  Armor (incl. Shields) {{ picked.armor|default(0) }},
+		  Weapons {{ picked.weapons|default(0) }},
+		  Magic {{ picked.magic|default(0) }},
+		  Critical Total {{ picked.critical|default(0) }} —
+		  M {{ picked.critical_mundane|default(0) }},
+		  Mat {{ picked.critical_materials|default(0) }},
+		  A/S {{ picked.critical_armor_shield|default(0) }},
+		  W {{ picked.critical_weapons|default(0) }},
+		  Mg {{ picked.critical_magic|default(0) }}<br>
+		  <strong>Rarity:</strong>
+		  Common {{ counts.common|default(0) }} •
+		  Uncommon {{ counts.uncommon|default(0) }} •
+		  Rare {{ counts.rare|default(0) }} •
+		  Unique {{ counts.unique|default(0) }}
+		</div>
+    </section>
+
+    <!-- Mundane -->
+    <section id="Mundane" class="pf-card mt-16">
+      <div class="pf-section__header"><h2 style="margin:0;">Mundane Items</h2><a href="#top" class="pf-link-chip" style="float: right;">↑ Top</a></div>
+      {% if mundane_items %}
+        <div class="p-12">
+          <div class="pf-table-wrap">
+            <table id="RarityMundane" class="pf-table zebra">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Level</th>
+                  <th>Rarity</th>
+                  <th>Price</th>
+                  <th>Quantity</th>
+                  <th>Category</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for it in mundane_items %}
+				<tr>
+                    <td>
+                      <a href="{{ aon_url(it.aon_target or it.name) }}" target="_blank" rel="noopener">{{ it.name }}</a>
+                      {% if it.critical %}<span class="badge critical" style="margin-left:6px;">Critical</span>{% endif %}
+                    </td>
+                    <td>{{ it.level }}</td>
+                    <td>
+                      {% set r = (it.rarity or 'Common')|lower %}
+                      <span class="badge rarity-chip {{ r }}">{{ it.rarity or 'Common' }}</span>
+                    </td>
+				<td>{{ it.price }}</td>
+				<td>{{ it.quantity }}</td>
+				<td>{{ it.category }}</td>
+				</tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      {% else %}
+        <p class="empty">No mundane inventory available at this time.</p>
+      {% endif %}
+    </section>
+
+	<!-- Materials -->
+	<section id="Materials" class="pf-card mt-16">
+	  <div class="pf-section__header"><h2 style="margin:0;">Materials</h2><a href="#top" class="pf-link-chip" style="float: right;">↑ Top</a></div>
+	  {% if material_items %}
+		<div class="p-12">
+		  <div class="pf-table-wrap">
+			<table id="RarityMaterials" class="pf-table zebra">
+			  <thead>
+				<tr>
+				  <th>Name</th>
+				  <th>Level</th>
+				  <th>Rarity</th>
+				  <th>Price</th>
+				  <th>Quantity</th>
+				  <th>Category</th>
+				</tr>
+			  </thead>
+			  <tbody>
+				{% for it in material_items %}
+				  <tr>
+					<td>
+					  <a href="{{ aon_url(it.aon_target or it.name) }}" target="_blank" rel="noopener">{{ it.name }}</a>
+					  {% if it.critical %}<span class="badge critical" style="margin-left:6px;">Critical</span>{% endif %}
+					</td>
+					<td>{{ it.level }}</td>
+					<td>
+					  {% set r = (it.rarity or 'Common')|lower %}
+					  <span class="badge rarity-chip {{ r }}">{{ it.rarity or 'Common' }}</span>
+					</td>
+					<td>{{ it.price }}</td>
+					<td>{{ it.quantity }}</td>
+					<td>{{ it.category }}</td>
+				  </tr>
+				{% endfor %}
+			  </tbody>
+			</table>
+		  </div>
+		</div>
+	  {% else %}
+		<p class="empty">No material inventory available at this time.</p>
+	  {% endif %}
+	</section>
+
+	<!-- Formulas -->
+	<section id="Formulas" class="pf-card mt-16">
+	  <div class="pf-section__header"><h2 style="margin:0;">Formulas</h2><a href="#top" class="pf-link-chip" style="float: right;">↑ Top</a></div>
+	  {% if formula_items %}
+		<div class="p-12">
+		  <div class="pf-table-wrap">
+			<table id="RarityFormulas" class="pf-table zebra">
+			  <thead>
+				<tr>
+				  <th>Name</th>
+				  <th>Level</th>
+				  <th>Rarity</th>
+				  <th>Price</th>
+				  <th>Quantity</th>
+				  <th>Category</th>
+				</tr>
+			  </thead>
+			  <tbody>
+				{% for it in formula_items %}
+				  <tr>
+					<td>
+					  <a href="{{ aon_url(it.aon_target or it.name) }}" target="_blank" rel="noopener">{{ it.name }}</a>
+					  {% if it.critical %}<span class="badge critical" style="margin-left:6px;">Critical</span>{% endif %}
+					</td>
+					<td>{{ it.level }}</td>
+					<td>
+					  {% set r = (it.rarity or 'Common')|lower %}
+					  <span class="badge rarity-chip {{ r }}">{{ it.rarity or 'Common' }}</span>
+					</td>
+					<td>{{ it.price }}</td>
+					<td>{{ it.quantity }}</td>
+					<td>{{ it.category }}</td>
+				  </tr>
+				{% endfor %}
+			  </tbody>
+			</table>
+		  </div>
+		</div>
+	  {% else %}
+		<p class="empty">No formula inventory available at this time</p>
+	  {% endif %}
+	</section>
+
+    <!-- Armor (incl. Shields) -->
+    <section id="Armor" class="pf-card mt-16">
+      <div class="pf-section__header"><h2 style="margin:0;">Armor (incl. Shields)</h2><a href="#top" class="pf-link-chip" style="float: right;">↑ Top</a></div>
+      {% if armor_items %}
+        <div class="p-12">
+          <div class="pf-table-wrap">
+            <table id="RarityArmor" class="pf-table zebra">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Level</th>
+                  <th>Rarity</th>
+                  <th>Price</th>
+                  <th>Quantity</th>
+                  <th>Category</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for it in armor_items %}
+                  <tr>
+					<td>
+					  <a href="{{ aon_url(it.base_name or it.name) }}" target="_blank" rel="noopener">
+						{{ it.name }}
+					  </a>
+					  {% if it.critical %}
+						<span class="badge critical" style="margin-left:6px;">Critical</span>
+					  {% endif %}
+
+					  {% if it.is_adjusted or ('adjustment:' in (it.tags or '')|lower) %}
+						<span class="badge adjusted" style="margin-left:6px;">Adjusted</span>
+					  {% endif %}
+					  
+					  {% if it.is_material or ('material:' in (it.tags or '')|lower) %}
+					    <span class="badge material" style="margin-left:6px;">Material</span>
+					  {% endif %}
+					</td>
+                    <td>{{ it.level }}</td>
+                    <td>
+                      {% set r = (it.rarity or 'Common')|lower %}
+                      <span class="badge rarity-chip {{ r }}">{{ it.rarity or 'Common' }}</span>
+                    </td>
+                    <td>{{ it.price }}</td>
+                    <td>{{ it.quantity }}</td>
+                    <td>{{ it.category }}</td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      {% else %}
+        <p class="empty">No armor inventory available at this time.</p>
+      {% endif %}
+    </section>
+
+    <!-- Weapons -->
+    <section id="Weapons" class="pf-card mt-16">
+      <div class="pf-section__header"><h2 style="margin:0;">Weapons</h2><a href="#top" class="pf-link-chip" style="float: right;">↑ Top</a></div>
+      {% if weapon_items %}
+        <div class="p-12">
+          <div class="pf-table-wrap">
+            <table id="RarityWeapons" class="pf-table zebra">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Level</th>
+                  <th>Rarity</th>
+                  <th>Price</th>
+                  <th>Quantity</th>
+                  <th>Category</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for it in weapon_items %}
+                  <tr>
+					<td>
+					  <a href="{{ aon_url(it.base_name or it.name) }}" target="_blank" rel="noopener">
+						{{ it.name }}
+					  </a>
+					  {% if it.critical %}
+						<span class="badge critical" style="margin-left:6px;">Critical</span>
+					  {% endif %}
+
+					  {% if it.is_adjusted or ('adjustment:' in (it.tags or '')|lower) %}
+						<span class="badge adjusted" style="margin-left:6px;">Adjusted</span>
+					  {% endif %}
+					  
+					  {% if it.is_material or ('material:' in (it.tags or '')|lower) %}
+					    <span class="badge material" style="margin-left:6px;">Material</span>
+					  {% endif %}
+					</td>
+                    <td>{{ it.level }}</td>
+                    <td>
+                      {% set r = (it.rarity or 'Common')|lower %}
+                      <span class="badge rarity-chip {{ r }}">{{ it.rarity or 'Common' }}</span>
+                    </td>
+                    <td>{{ it.price }}</td>
+                    <td>{{ it.quantity }}</td>
+                    <td>{{ it.category }}</td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      {% else %}
+        <p class="empty">No weapon inventory available at this time.</p>
+      {% endif %}
+    </section>
+
+    <!-- Magic -->
+    <section id="Magic" class="pf-card mt-16">
+      <div class="pf-section__header">
+		  <h2 id="Magic" class="pf-section__title">Magic Items</h2>
+		  <a href="#top" class="pf-link-chip pf-top-link" aria-label="Back to top">↑ Top</a>
+	  </div>
+      {% if magic_items %}
+        <div class="p-12">
+          <div class="pf-table-wrap">
+            <table id="RarityMagic" class="pf-table zebra">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Level</th>
+                  <th>Rarity</th>
+                  <th>Price</th>
+                  <th>Quantity</th>
+                  <th>Category</th>
+                </tr>
+              </thead>
+				<tbody>
+				  {% for it in magic_items %}
+					{# normalize strings once #}
+					{% set n = ((it.name or '')|string)|lower %}
+					{% set c = ((it.category or '')|string)|lower %}
+					{# spellbook if category contains 'spellbook' or name starts with 'spellbook' #}
+					{% set is_sb = ('spellbook' in c) or (n[:9] == 'spellbook') %}
+
+					<tr class="mi-row {% if is_sb %}is-spellbook{% endif %}">
+					  <td class="name-cell">
+						{% if is_sb and it.details_html %}
+						  <details class="mi-accordion">
+							<summary>
+							  <a href="{{ aon_url(it.aon_target or it.name) }}" target="_blank" rel="noopener">{{ it.name }}</a>
+							  {% if it.critical %}<span class="badge critical" style="margin-left:6px;">Critical</span>{% endif %}
+							</summary>
+							{{ it.details_html | safe }}
+						  </details>
+						{% else %}
+						  <a href="{{ aon_url(it.aon_target or it.name) }}" target="_blank" rel="noopener">{{ it.name }}</a>
+						  {% if it.critical %}<span class="badge critical" style="margin-left:6px;">Critical</span>{% endif %}
+						{% endif %}
+					  </td>
+					  <td>{{ it.level }}</td>
+					  <td>
+						{% set r = (it.rarity or 'Common')|lower %}
+						<span class="badge rarity-chip {{ r }}">{{ it.rarity or 'Common' }}</span>
+					  </td>
+					  <td>{{ it.price }}</td>
+					  <td>{{ it.quantity }}</td>
+					  <td>{{ it.category }}</td>
+					</tr>
+				  {% endfor %}
+				</tbody>
+            </table>
+          </div>
+        </div>
+      {% else %}
+        <p class="empty">No magic inventory available at this time.</p>
+      {% endif %}
+    </section>
+
+    <script>
+      function exportToCSV() {
+        const csvHeaders = ["Section", "Name", "Level", "Rarity", "Price", "Quantity", "Category"];
+        let csvContent = "data:text/csv;charset=utf-8," + csvHeaders.join(",") + "\n";
+        const allTables = document.querySelectorAll('[id^="Rarity"]');
+        allTables.forEach(table => {
+          const sectionTitle = table.closest("section")?.querySelector(".pf-section__header h2")?.innerText?.trim()
+                              || table.id.replace(/^Rarity/, "");
+          const rows = table.querySelectorAll("tbody tr");
+          rows.forEach(row => {
+            const cells = Array.from(row.querySelectorAll("td")).map(cell =>
+              '"' + cell.innerText.replace(/"/g, '""') + '"'
+            );
+            csvContent += ['"'+sectionTitle.replace(/"/g,'""')+'"', ...cells].join(",") + "\n";
+          });
+        });
+        const encodedUri = encodeURI(csvContent);
+        const link = document.createElement("a");
+        link.setAttribute("href", encodedUri);
+        link.setAttribute("download", "treasure_results.csv");
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+      }
+
+      // Dynamic document title reflecting filters
+      (function() {
+        const shop = "{{ (shop_type or 'Any') | replace('_',' ') | title }}";
+        const size = "{{ shop_size|title }}";
+        const disp = "{{ disposition|title }}";
+        const pl   = "{{ party_level }}";
+        document.title = `Inventory – ${shop} / ${size} / ${disp} / PL ${pl}`;
+      })();
+    </script>
+
+  </div><!-- .pf-app -->
+</body>
+</html>

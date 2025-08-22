@@ -1,0 +1,138 @@
+{
+  "data_source": "sqlite",
+  "sqlite_db_path": "C:/Users/kkroe/Desktop/shopgen_web/PF2e_Treasure_Generator_Backend_with_stockflag.db",
+  "sqlite_view": "v_items_norm",
+  "csv_path": "/mnt/data/v_items_norm.csv",
+  "sqlite_adjustments_table": "Adjustments",
+  "csv_adjustments_path": "data/adjustments.csv",
+  "random_seed": 1337,
+
+  "default_shop_types": [
+    "Adventuring",
+    "Alchemist",
+    "Arcane",
+    "Armorer",
+    "Blacksmith",
+    "Bowyer",
+    "General",
+    "Jewelry",
+    "Leatherworker",
+    "Music_Games",
+    "Illicit",
+    "Scribe",
+    "Tailor",
+    "Tattooist",
+    "Temple",
+    "Weaponsmith"
+  ],
+
+  "counts_by_shop": {
+    "adventuring": {
+      "small":  { "mundane": [8, 12], "armor": [3, 5], "weapons": [4, 6], "magic": [6, 8] },
+      "medium": { "mundane": [14,18], "armor": [6, 8], "weapons": [7, 9], "magic": [10,12] },
+      "large":  { "mundane": [20,26], "armor": [9,12], "weapons": [10,14], "magic": [15,18] },
+      "grand":  { "mundane": [28,36], "armor": [12,16], "weapons": [14,18], "magic": [20,26] }
+    },
+    "arcane": {
+      "small":  { "mundane": [4, 6],  "armor": [2, 3], "weapons": [3, 4], "magic": [10,14] },
+      "medium": { "mundane": [6, 8],  "armor": [3, 4], "weapons": [4, 6], "magic": [16,20] },
+      "large":  { "mundane": [8,10],  "armor": [4, 6], "weapons": [6, 8], "magic": [22,28] },
+      "grand":  { "mundane": [10,12], "armor": [6, 8], "weapons": [8,10], "magic": [28,36] }
+    }
+  },
+
+	"counts": {
+		"small":  { "mundane": [4, 8], "armor": [1, 2], "weapons": [1, 2], "magic": [2, 4], "materials": [0, 2], "formulas": [1, 2] },
+		"medium": { "mundane": [6, 12], "armor": [2, 3], "weapons": [2, 3], "magic": [3, 5], "materials": [1, 3], "formulas": [1, 3] },
+		"large":  { "mundane": [8, 14], "armor": [3, 4], "weapons": [3, 4], "magic": [4, 6], "materials": [1, 4], "formulas": [2, 4] },
+		"grand":  { "mundane": [10, 18], "armor": [4, 6], "weapons": [4, 6], "magic": [6, 8], "materials": [2, 6], "formulas": [3, 6] }
+	},
+
+  "specific_magic_counts_by_shop": {
+    "adventuring": { "small": [0,1], "medium": [1,2], "large": [2,3], "grand": [3,5] },
+    "arcane":      { "small": [1,2], "medium": [2,3], "large": [3,5], "grand": [5,7] }
+  },
+
+  "specific_magic_counts": { "small": [0,1], "medium": [1,2], "large": [2,4], "grand": [3,5] },
+
+  "disposition_multipliers": {
+    "greedy": 0.9,
+    "fair": 1.0,
+    "generous": 1.15
+  },
+
+  "level_spread": { "min_offset": -3, "max_offset": 1 },
+
+  "rarity_weights": { "Common": 80, "Uncommon": 16, "Rare": 4 },
+
+  "rarity_price_multipliers": { "Uncommon": 1.25, "Rare": 1.50, "Unique": 2.00 },
+
+  "level_caps": { "min": 1, "max": 20 },
+
+  "quantity_boost": {
+    "mundane": {
+      "small":  { "p": 0.35, "add_min": 0, "add_max": 1, "max_per_item": 3, "crit_add_min": 1, "crit_add_max": 1 },
+      "medium": { "p": 0.55, "add_min": 0, "add_max": 2, "max_per_item": 5, "crit_add_min": 1, "crit_add_max": 2 },
+      "large":  { "p": 0.70, "add_min": 1, "add_max": 3, "max_per_item": 7, "crit_add_min": 1, "crit_add_max": 3 },
+      "grand":  { "p": 0.85, "add_min": 1, "add_max": 4, "max_per_item": 9, "crit_add_min": 2, "crit_add_max": 4 }
+    },
+    "weapons": {
+      "small":  { "p": 0.25, "add_min": 0, "add_max": 1, "max_per_item": 2, "crit_add_min": 0, "crit_add_max": 1 },
+      "medium": { "p": 0.40, "add_min": 0, "add_max": 1, "max_per_item": 3, "crit_add_min": 0, "crit_add_max": 1 },
+      "large":  { "p": 0.55, "add_min": 0, "add_max": 2, "max_per_item": 4, "crit_add_min": 1, "crit_add_max": 2 },
+      "grand":  { "p": 0.70, "add_min": 1, "add_max": 2, "max_per_item": 5, "crit_add_min": 1, "crit_add_max": 2 }
+    },
+    "armor": {
+      "small":  { "p": 0.25, "add_min": 0, "add_max": 1, "max_per_item": 2, "crit_add_min": 0, "crit_add_max": 1 },
+      "medium": { "p": 0.40, "add_min": 0, "add_max": 1, "max_per_item": 3, "crit_add_min": 0, "crit_add_max": 1 },
+      "large":  { "p": 0.55, "add_min": 0, "add_max": 2, "max_per_item": 4, "crit_add_min": 1, "crit_add_max": 2 },
+      "grand":  { "p": 0.70, "add_min": 1, "add_max": 2, "max_per_item": 5, "crit_add_min": 1, "crit_add_max": 2 }
+    },
+    "magic": {
+      "small":  { "p": 0.30, "add_min": 0, "add_max": 1, "max_per_item": 2, "crit_add_min": 0, "crit_add_max": 1 },
+      "medium": { "p": 0.45, "add_min": 0, "add_max": 1, "max_per_item": 3, "crit_add_min": 0, "crit_add_max": 1 },
+      "large":  { "p": 0.60, "add_min": 0, "add_max": 2, "max_per_item": 4, "crit_add_min": 1, "crit_add_max": 2 },
+      "grand":  { "p": 0.70, "add_min": 1, "add_max": 2, "max_per_item": 5, "crit_add_min": 1, "crit_add_max": 2 }
+    }
+  },
+
+  "critical_bonus_rate": 0.25,
+
+  "spellbooks": {
+    "drop_rate": 0.35, "max_books": 3
+  },
+
+  "source_table_groups": {
+    "mundane": ["mundane", "adjustments"],
+    "weapons": ["weapon_basic", "weapons_basic"],
+    "armor":   ["armor_basic", "shield_basic"],
+    "magic":   ["alchemical_items", "cc_structure", "consumables", "grimoire", "held_items", "runes", "rituals",
+                "snares", "scrolls", "spellhearts", "staff_wand", "tattoos", "worn_items"],
+    "specific_magic_armor":   ["specific_magic_armor", "specific_magic_shield"],
+    "specific_magic_weapons": ["specific_magic_weapons"],
+    "materials": ["materials"]
+  },
+
+  "adjustments": {
+    "apply_rate": { "armor": 0.10, "shield": 0.05, "weapon": 0.10 },
+    "name_template": "{adj} {base}"
+  },
+
+  "materials": {
+    "apply_rate": 0.05
+  },
+
+  "weapon_runes": {
+    "fundamental": { "apply_rate": 0.35, "potency_weights": { "1": 5, "2": 2, "3": 1 } },
+    "property":    { "apply_rate": 0.50, "per_slot_rate": 0.50 }
+  },
+
+  "armor_runes": {
+    "fundamental": { "apply_rate": 0.35, "potency_weights": { "1": 4, "2": 2, "3": 1 } },
+    "property":    { "apply_rate": 0.50, "per_slot_rate": 0.50 }
+  },
+
+  "shield_runes": {
+    "property": { "apply_rate": 0.35 }
+  }
+}
