@@ -3,8 +3,7 @@
   "sqlite_db_path": "data/PF2e_Treasure_Generator_Backend.db",
   "sqlite_view": "v_items_norm",
   "sqlite_adjustments_table": "Adjustments",
-  "random_seed": 1337
-}
+  "random_seed": 1337,
 
   "default_shop_types": [
     "Adventuring",
@@ -40,12 +39,12 @@
     }
   },
 
-	"counts": {
-		"small":  { "mundane": [4, 8], "armor": [1, 2], "weapons": [1, 2], "magic": [2, 4], "materials": [0, 2], "formulas": [1, 2] },
-		"medium": { "mundane": [6, 12], "armor": [2, 3], "weapons": [2, 3], "magic": [3, 5], "materials": [1, 3], "formulas": [1, 3] },
-		"large":  { "mundane": [8, 14], "armor": [3, 4], "weapons": [3, 4], "magic": [4, 6], "materials": [1, 4], "formulas": [2, 4] },
-		"grand":  { "mundane": [10, 18], "armor": [4, 6], "weapons": [4, 6], "magic": [6, 8], "materials": [2, 6], "formulas": [3, 6] }
-	},
+  "counts": {
+    "small":  { "mundane": [4, 8], "armor": [1, 2], "weapons": [1, 2], "magic": [2, 4], "materials": [0, 2], "formulas": [1, 2] },
+    "medium": { "mundane": [6, 12], "armor": [2, 3], "weapons": [2, 3], "magic": [3, 5], "materials": [1, 3], "formulas": [1, 3] },
+    "large":  { "mundane": [8, 14], "armor": [3, 4], "weapons": [3, 4], "magic": [4, 6], "materials": [1, 4], "formulas": [2, 4] },
+    "grand":  { "mundane": [10, 18], "armor": [4, 6], "weapons": [4, 6], "magic": [6, 8], "materials": [2, 6], "formulas": [3, 6] }
+  },
 
   "specific_magic_counts_by_shop": {
     "adventuring": { "small": [0,1], "medium": [1,2], "large": [2,3], "grand": [3,5] },
@@ -97,16 +96,13 @@
 
   "critical_bonus_rate": 0.25,
 
-  "spellbooks": {
-    "drop_rate": 0.35, "max_books": 3
-  },
+  "spellbooks": { "drop_rate": 0.35, "max_books": 3 },
 
   "source_table_groups": {
     "mundane": ["mundane", "adjustments"],
     "weapons": ["weapon_basic", "weapons_basic"],
     "armor":   ["armor_basic", "shield_basic"],
-    "magic":   ["alchemical_items", "cc_structure", "consumables", "grimoire", "held_items", "runes", "rituals",
-                "snares", "scrolls", "spellhearts", "staff_wand", "tattoos", "worn_items"],
+    "magic":   ["alchemical_items", "cc_structure", "consumables", "grimoire", "held_items", "runes", "rituals", "snares", "scrolls", "spellhearts", "staff_wand", "tattoos", "worn_items"],
     "specific_magic_armor":   ["specific_magic_armor", "specific_magic_shield"],
     "specific_magic_weapons": ["specific_magic_weapons"],
     "materials": ["materials"]
@@ -117,9 +113,7 @@
     "name_template": "{adj} {base}"
   },
 
-  "materials": {
-    "apply_rate": 0.05
-  },
+  "materials": { "apply_rate": 0.05 },
 
   "weapon_runes": {
     "fundamental": { "apply_rate": 0.35, "potency_weights": { "1": 5, "2": 2, "3": 1 } },
@@ -131,7 +125,5 @@
     "property":    { "apply_rate": 0.50, "per_slot_rate": 0.50 }
   },
 
-  "shield_runes": {
-    "property": { "apply_rate": 0.35 }
-  }
+  "shield_runes": { "property": { "apply_rate": 0.35 } }
 }
