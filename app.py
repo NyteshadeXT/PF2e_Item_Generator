@@ -1,29 +1,65 @@
-# app.py
+# app.py — cleaned and production-ready (Render + SSE + Player View)
 
-from flask import Flask, render_template, request, send_file, redirect
+from flask import (
+    Flask, render_template, request, send_file, redirect, abort,
+    Response, stream_with_context, current_app
+)
 import io
 import csv
+import json
+import queue
+import time
+import uuid
 import pandas as pd
 
+# Your project likely uses a "services" package; keep these imports as-is
 from services.db import load_items
 from services.logic import (
     select_mundane_items, select_weapons_items, select_armor_items,
     select_specific_magic_armor, select_specific_magic_weapons,
     select_magic_items, select_materials, CONFIG as LOGIC_CONFIG,
-    select_formulas,)
+    select_formulas,
+)
 from services.utils import rarity_counts, aon_url
 from services.spellbooks import select_spellbooks
 
-# Debug/health endpoints live in this blueprint
-from services.debug import bp as debug_bp
+# Optional: debug blueprint (if exists)
+try:
+    from services.debug import bp as debug_bp
+except Exception:
+    debug_bp = None
 
 app = Flask(__name__)
-app.register_blueprint(debug_bp, url_prefix="/debug")
+if debug_bp is not None:
+    app.register_blueprint(debug_bp, url_prefix="/debug")
 
-# Optional: preserve the existing /health link in index.html
-@app.route("/health")
-def health_redirect():
-    return redirect("/debug/health", code=302)
+# Make AoN helper available in Jinja
+app.jinja_env.globals["aon_url"] = aon_url
+
+
+# ----------------------------
+# Helper utilities
+# ----------------------------
+def _norm_str(x):
+    if x is None:
+        return ""
+    try:
+        return str(x).strip()
+    except Exception:
+        return ""
+
+
+def _to_int(x):
+    try:
+        if x is None or x == "":
+            return 0
+        return int(float(x))
+    except Exception:
+        return 0
+
+
+def _count_crit(items):
+    return sum(1 for it in (items or []) if it.get("critical"))
 
 
 def get_shop_types(df: pd.DataFrame):
@@ -32,11 +68,202 @@ def get_shop_types(df: pd.DataFrame):
     return LOGIC_CONFIG.get("default_shop_types", [])
 
 
-def _count_crit(items):
-    return sum(1 for it in (items or []) if it.get("critical"))
+def _common_inputs():
+    shop_type = (request.form.get("shop_type") or "General").strip()
+    shop_size = (request.form.get("shop_size") or "medium").strip()
+    disposition = (request.form.get("disposition") or "fair").strip()
+    try:
+        party_level = int(request.form.get("party_level") or 5)
+    except Exception:
+        party_level = 5
+    return shop_type, shop_size, disposition, party_level
 
 
-# app.py (only the index() function shown)
+def _build_payload(df, shop_type, shop_size, disposition, party_level):
+    """Mirror results-building logic for a safe Player View fallback."""
+    mnd = select_mundane_items(df, shop_type, party_level, shop_size, disposition)
+    mat = select_materials(df, shop_type, party_level, shop_size, disposition)
+    arm = select_armor_items(df, shop_type, party_level, shop_size, disposition)
+    wep = select_weapons_items(df, shop_type, party_level, shop_size, disposition)
+    mag = select_magic_items(df, shop_type, party_level, shop_size, disposition)
+    frm = select_formulas(df, shop_type, party_level, shop_size, disposition)
+
+    window = (mag.get("window") if isinstance(mag, dict) else None) or (party_level, party_level)
+
+    return {
+        "mundane_items":   mnd.get("items", []),
+        "materials_items": mat.get("items", []),
+        "armor_items":     arm.get("items", []),
+        "weapons_items":   wep.get("items", []),
+        "magic_items":     mag.get("items", []) if isinstance(mag, dict) else [],
+        "formulas_items":  frm.get("items", []),
+        "window": window,
+    }
+
+
+# ----------------------------
+# Real-time broadcaster (SSE)
+# ----------------------------
+_subscribers: dict[str, list[queue.Queue]] = {}   # channel -> queues
+_latest_roll_id: dict[str, str] = {}              # channel -> last id
+
+
+def _subscribe(channel: str) -> queue.Queue:
+    q = queue.Queue(maxsize=10)
+    _subscribers.setdefault(channel, []).append(q)
+    return q
+
+
+def _publish(channel: str, roll_id: str) -> None:
+    """Publish a new roll id to all subscribers of a channel."""
+    _latest_roll_id[channel] = roll_id
+    for q in _subscribers.get(channel, [])[:]:
+        try:
+            q.put_nowait(roll_id)
+        except Exception:
+            try:
+                _subscribers[channel].remove(q)
+            except ValueError:
+                pass
+
+
+def _current_roll_id(channel: str) -> str:
+    return _latest_roll_id.get(channel, "")
+
+
+@app.route("/events")
+def sse_events():
+    """Server-Sent Events endpoint for live updates on new rolls."""
+    channel = (request.args.get("channel") or "default").strip().lower()
+    q = _subscribe(channel)
+
+    @stream_with_context
+    def event_stream():
+        # Send last known id immediately for late joiners
+        last = _current_roll_id(channel)
+        if last:
+            yield f"event: init\\ndata: {last}\\n\\n"
+
+        heartbeat_every = 25
+        last_beat = time.time()
+        try:
+            while True:
+                try:
+                    timeout = max(1, heartbeat_every - int(time.time() - last_beat))
+                    rid = q.get(timeout=timeout)
+                    yield f"data: {rid}\\n\\n"
+                except queue.Empty:
+                    # heartbeat comment to keep proxies from buffering
+                    yield ": keep-alive\\n\\n"
+                    last_beat = time.time()
+        finally:
+            # remove this subscriber
+            try:
+                _subscribers[channel].remove(q)
+            except ValueError:
+                pass
+
+    return Response(event_stream(), mimetype="text/event-stream", headers={
+        "Cache-Control": "no-cache",
+        "X-Accel-Buffering": "no",
+    })
+
+
+@app.route("/version")
+def version():
+    """Lightweight polling fallback: returns the current roll id for a channel."""
+    channel = (request.args.get("channel") or "default").strip().lower()
+    return {"roll_id": _current_roll_id(channel)}
+
+
+# Optional: preserve the existing /health link in index.html
+@app.route("/health")
+def health_redirect():
+    return redirect("/debug/health", code=302)
+
+
+# ----------------------------
+# Routes
+# ----------------------------
+@app.post("/player-view")
+def player_view():
+    """Render player-facing page from an exact GM snapshot, with graceful fallback."""
+    raw = request.form.get("snapshot")
+    channel = (request.form.get("channel") or "default").strip().lower()
+    roll_id = (request.form.get("roll_id") or "").strip()
+
+    lists: dict = {}
+    meta: dict = {}
+
+    # 1) Prefer exact GM snapshot if present
+    if raw:
+        try:
+            snap = json.loads(raw) or {}
+            if "lists" in snap or "shop" in snap:
+                lists = snap.get("lists") or {}
+                meta = snap.get("shop") or {}
+            else:
+                # tolerate a flat snapshot (legacy format)
+                lists = {
+                    "mundane_items":  snap.get("mundane_items", []),
+                    "material_items": snap.get("material_items", []) or snap.get("materials_items", []),
+                    "armor_items":    snap.get("armor_items", []),
+                    "weapon_items":   snap.get("weapon_items", []),
+                    "magic_items":    snap.get("magic_items", []),
+                    "formula_items":  snap.get("formula_items", []),
+                }
+                meta = {
+                    "shop_type":   snap.get("shop_type"),
+                    "shop_size":   snap.get("shop_size"),
+                    "disposition": snap.get("disposition"),
+                    "party_level": snap.get("party_level"),
+                    "window":      snap.get("window"),
+                }
+        except Exception as e:
+            current_app.logger.exception("Invalid snapshot JSON posted to /player-view: %s", e)
+            lists, meta = {}, {}
+
+    # 2) Fallback: recompute only if snapshot is missing
+    if not lists:
+        df = load_items()
+        shop_type, shop_size, disposition, party_level = _common_inputs()
+        payload = _build_payload(df, shop_type, shop_size, disposition, party_level)
+        lists = {
+            "mundane_items":  payload.get("mundane_items", []),
+            "material_items": payload.get("materials_items", []),
+            "armor_items":    payload.get("armor_items", []),
+            "weapon_items":   payload.get("weapons_items", []),
+            "magic_items":    payload.get("magic_items", []),
+            "formula_items":  payload.get("formulas_items", []),
+        }
+        meta = {
+            "shop_type": shop_type,
+            "shop_size": shop_size,
+            "disposition": disposition,
+            "party_level": party_level,
+            "window": payload.get("window"),
+        }
+
+    if not lists:
+        abort(400, "Player View: missing/invalid snapshot.")
+
+    page_title = f"Player View — {(meta.get('shop_type') or 'Shop').title()}"
+    return render_template(
+        "results_player.html",   # ensure this file exists in templates/
+        page_title=page_title,
+        shop_type=meta.get("shop_type"),
+        mundane_items=lists.get("mundane_items", []),
+        material_items=lists.get("material_items", []),
+        armor_items=lists.get("armor_items", []),
+        weapon_items=lists.get("weapon_items", []),
+        magic_items=lists.get("magic_items", []),
+        formula_items=lists.get("formula_items", []),
+        aon_url=aon_url,
+        channel=channel,
+        roll_id=roll_id,
+    )
+
+
 @app.route("/", methods=["GET"])
 def index():
     df = load_items()
@@ -67,17 +294,17 @@ def query():
         party_level = 5
 
     # Run selections
-    mundane_result  = select_mundane_items(df, shop_type, party_level, shop_size, disposition)
-    armor_basic     = select_armor_items(df, shop_type, party_level, shop_size, disposition)
-    weapons_result  = select_weapons_items(df, shop_type, party_level, shop_size, disposition)
-    armor_magic     = select_specific_magic_armor(df, shop_type, party_level, shop_size, disposition)
-    weapon_magic    = select_specific_magic_weapons(df, shop_type, party_level, shop_size, disposition)
-    magic_basic     = select_magic_items(df, shop_type, party_level, shop_size, disposition)
-    material_result = select_materials(df, shop_type, party_level, shop_size, disposition)
-    result_formulas = select_formulas(df, shop_type, party_level, shop_size, disposition)
+    mundane_result   = select_mundane_items(df, shop_type, party_level, shop_size, disposition)
+    armor_basic      = select_armor_items(df, shop_type, party_level, shop_size, disposition)
+    weapons_result   = select_weapons_items(df, shop_type, party_level, shop_size, disposition)
+    armor_magic      = select_specific_magic_armor(df, shop_type, party_level, shop_size, disposition)
+    weapon_magic     = select_specific_magic_weapons(df, shop_type, party_level, shop_size, disposition)
+    magic_basic      = select_magic_items(df, shop_type, party_level, shop_size, disposition)
+    material_result  = select_materials(df, shop_type, party_level, shop_size, disposition)
+    result_formulas  = select_formulas(df, shop_type, party_level, shop_size, disposition)
     spellbook_result = select_spellbooks(
         df=df,
-        shop_type=shop_type,          # whatever var you already use (e.g. request form)
+        shop_type=shop_type,
         party_level=party_level,
         shop_size=shop_size,
         disposition=disposition,
@@ -88,28 +315,28 @@ def query():
     mundane_items  = (mundane_result.get("items") or [])
     magic_armor    = (armor_magic.get("items") or [])
     magic_weapons  = (weapon_magic.get("items") or [])
-    armor_items    = (armor_basic.get("items") or []) + magic_armor     # show specific-magic armor in Armor table
-    weapon_items   = (weapons_result.get("items") or []) + magic_weapons  # show specific-magic weapons in Weapon table
-    magic_items = (magic_basic.get("items") or [])
-    magic_items += (spellbook_result.get("items") or [])
-    
+    armor_items    = (armor_basic.get("items") or []) + magic_armor          # show specific-magic armor in Armor table
+    weapon_items   = (weapons_result.get("items") or []) + magic_weapons      # show specific-magic weapons in Weapon table
+    magic_items    = (magic_basic.get("items") or [])
+    magic_items   += (spellbook_result.get("items") or [])
+
     # Helper: unique-by (name, price, rarity, level)
     def _uniq(items):
-    seen, out = set(), []
-    for it in items or []:
-        key = (
-            _norm_str(it.get("name")),
-            _norm_str(it.get("price") or it.get("price_text")),
-            _norm_str(it.get("rarity")),
-            _to_int(it.get("level")),
-        )
-        if key in seen:
-            continue
-        seen.add(key)
-        out.append(it)
-    return out
+        seen, out = set(), []
+        for it in items or []:
+            key = (
+                _norm_str(it.get("name")),
+                _norm_str(it.get("price") or it.get("price_text")),
+                _norm_str(it.get("rarity")),
+                _to_int(it.get("level")),
+            )
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append(it)
+        return out
 
-    # Runed weapons and armor for counts
+    # Runed weapons/armor for counts
     runed_weapons = [w for w in weapon_items if (w.get("category") == "Runed Weapon" or w.get("is_magic_countable"))]
     weapons_nonruned = [w for w in weapon_items if w not in runed_weapons]
 
@@ -132,7 +359,7 @@ def query():
         "armor":     len(armor_u),
         "weapons":   len(weapons_u),   # runed weapons excluded here
         "magic":     len(magic_u),     # runed weapons included here
-        "formulas": len(result_formulas.get("items", [])), 
+        "formulas":  len(result_formulas.get("items", [])),
 
         # Critical counts: follow the same partition as above
         "critical": (
@@ -157,6 +384,37 @@ def query():
         ),
     }
 
+    # Snapshot for Player View
+    magic_window = None
+    try:
+        if isinstance(magic_basic, dict):
+            magic_window = magic_basic.get("window")
+    except Exception:
+        magic_window = None
+
+    snapshot = {
+        "shop": {
+            "shop_type": shop_type,
+            "shop_size": shop_size,
+            "disposition": disposition,
+            "party_level": party_level,
+            "window": magic_window,
+        },
+        "lists": {
+            "mundane_items": mundane_items,
+            "material_items": material_items,
+            "armor_items": armor_items,
+            "weapon_items": weapon_items,
+            "magic_items": magic_items,
+            "formula_items": result_formulas.get("items", []),
+        }
+    }
+
+    # Publish a new roll id for live reloads
+    channel = (request.form.get("channel") or "default").strip().lower()
+    roll_id = uuid.uuid4().hex[:12]
+    _publish(channel, roll_id)
+
     return render_template(
         "results.html",
         shop_type=shop_type,
@@ -170,8 +428,12 @@ def query():
         armor_items=armor_items,
         weapon_items=weapon_items,
         magic_items=magic_items,
-        formula_items = result_formulas.get("items", []),
-        aon_url=aon_url,   # 👈 add this
+        formula_items=result_formulas.get("items", []),
+        aon_url=aon_url,
+        snapshot=snapshot,
+        window=magic_window,
+        roll_id=roll_id,
+        channel=channel,
     )
 
 
@@ -186,6 +448,7 @@ def export_csv():
 
     # CSV columns (order)
     columns = ["Name", "Level", "Rarity", "Price", "Quantity", "Category"]
+
     # Normalize keys from your item dicts
     def row(i):
         return [
@@ -216,5 +479,5 @@ def export_csv():
 
 
 if __name__ == "__main__":
-    # For local dev convenience; in production use a WSGI server
+    # For local dev convenience; in production use a WSGI server (gunicorn on Render)
     app.run(host="0.0.0.0", port=5000, debug=True)
