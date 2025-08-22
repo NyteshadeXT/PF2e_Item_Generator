@@ -1,11 +1,9 @@
 {
   "data_source": "sqlite",
-  "sqlite_db_path": "C:/Users/kkroe/Desktop/shopgen_web/PF2e_Treasure_Generator_Backend_with_stockflag.db",
+  "sqlite_db_path": "data/PF2e_Treasure_Generator_Backend.db",
   "sqlite_view": "v_items_norm",
-  "csv_path": "/mnt/data/v_items_norm.csv",
   "sqlite_adjustments_table": "Adjustments",
-  "csv_adjustments_path": "data/adjustments.csv",
-  "random_seed": 1337,
+  "random_seed": 1337
 
   "default_shop_types": [
     "Adventuring",
