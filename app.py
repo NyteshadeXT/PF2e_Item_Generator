@@ -19,9 +19,11 @@ from services.logic import (
     select_magic_items, select_materials, CONFIG as LOGIC_CONFIG,
     select_formulas,
 )
-from services.utils import rarity_counts, aon_url, aon_spell_url
+from services.utils import rarity_counts, aon_url
 from services.spellbooks import select_spellbooks
 from services.spellbooks import build_spellbook
+# from services.utils import aon_spell_url
+
 
 # Optional: debug blueprint (if exists)
 try:
@@ -226,7 +228,7 @@ def player_view():
                 # tolerate a flat snapshot (legacy format)
                 lists = {
                     "mundane_items":  snap.get("mundane_items", []),
-                    "material_items": snap.get("material_items", []) or snap.get(
+                    "material_items": snap.get("material_items", []) or snap.get("materials_items", []),
                     "armor_items":    snap.get("armor_items", []),
                     "weapon_items":   snap.get("weapon_items", []),
                     "magic_items":    snap.get("magic_items", []),
@@ -453,6 +455,7 @@ def spellbooks_page():
 @app.post("/api/spellbooks/generate")
 def api_generate_spellbook():
     data = request.get_json(force=True) or {}
+
     tradition = (data.get("tradition") or "").strip().title()
     if tradition not in ("Arcane", "Divine", "Occult", "Primal"):
         return jsonify(ok=False, error="Invalid or missing tradition"), 400
@@ -462,19 +465,17 @@ def api_generate_spellbook():
     except Exception:
         max_level = 1
 
-    themes = [t.strip() for t in (data.get("themes") or []) if t and str(t).strip()]
+    # themes can be a list or comma-separated string; normalize to list[str]
+    raw_themes = data.get("themes") or []
+    if isinstance(raw_themes, str):
+        themes = [t.strip() for t in raw_themes.split(",") if t.strip()]
+    else:
+        themes = [str(t).strip() for t in raw_themes if str(t).strip()]
+
+    # Use the library function to build a book directly
     spells = build_spellbook(tradition=tradition, book_level=max_level, themes=themes)
 
-    html = render_template(
-        "spellbook_page.html",
-        spells=spells,
-        tradition=tradition,
-        max_level=max_level,
-        themes=themes,
-        aon_url=aon_url,
-        embed=True,  # render just the table section
-    )
-    return jsonify(ok=True, count=len(spells), html=html)
+    return jsonify(ok=True, spells=spells)
 
 @app.get("/spellbooks/view")
 def spellbooks_view():
