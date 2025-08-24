@@ -284,25 +284,9 @@ def player_view():
     )
 
 
-@app.route("/", methods=["GET"])
-def index():
-    df = load_items()
-    shop_types = get_shop_types(df)
-    dispositions = list(LOGIC_CONFIG.get("disposition_multipliers", {}).keys())
-    return render_template(
-        "index.html",
-        shop_types=shop_types,
-        shop_type=None,
-        shop_size="medium",
-        disposition="fair",
-        dispositions=dispositions,
-        party_level=5,
-    )
-
-
 @app.route("/query", methods=["GET", "POST"])
 def query():
-    data = request.values  # works for both .args (GET) and .form (POST)
+    data = request.values  # supports both .args (GET) and .form (POST)
     df = load_items()
 
     # Inputs from the form
@@ -336,8 +320,8 @@ def query():
     mundane_items  = (mundane_result.get("items") or [])
     magic_armor    = (armor_magic.get("items") or [])
     magic_weapons  = (weapon_magic.get("items") or [])
-    armor_items    = (armor_basic.get("items") or []) + magic_armor          # show specific-magic armor in Armor table
-    weapon_items   = (weapons_result.get("items") or []) + magic_weapons      # show specific-magic weapons in Weapon table
+    armor_items    = (armor_basic.get("items") or []) + magic_armor
+    weapon_items   = (weapons_result.get("items") or []) + magic_weapons
     magic_items    = (magic_basic.get("items") or [])
     magic_items   += (spellbook_result.get("items") or [])
 
@@ -346,10 +330,10 @@ def query():
         seen, out = set(), []
         for it in items or []:
             key = (
-                _norm_str(it.get("name")),
-                _norm_str(it.get("price") or it.get("price_text")),
-                _norm_str(it.get("rarity")),
-                _to_int(it.get("level")),
+                (it.get("name") or "").strip(),
+                (it.get("price") or it.get("price_text") or "").strip(),
+                (it.get("rarity") or "").strip(),
+                int((it.get("level") or 0) or 0),
             )
             if key in seen:
                 continue
@@ -357,51 +341,51 @@ def query():
             out.append(it)
         return out
 
-    # Runed weapons/armor for counts
+    # Partition for counts
     runed_weapons = [w for w in weapon_items if (w.get("category") == "Runed Weapon" or w.get("is_magic_countable"))]
     weapons_nonruned = [w for w in weapon_items if w not in runed_weapons]
 
     runed_armor = [a for a in armor_items if (a.get("category") == "Runed Armor" or a.get("is_magic_countable"))]
     armor_nonruned = [a for a in armor_items if a not in runed_armor]
 
-    # Unique lists used for the "Picked" header math
     mundane_u   = _uniq(mundane_items)
     materials_u = _uniq(material_items)
     armor_u     = _uniq(armor_items)
     weapons_u   = _uniq(weapons_nonruned)
     magic_u     = _uniq(magic_items + magic_armor + magic_weapons + runed_weapons + runed_armor)
 
-    # Summary counts based on what is actually displayed (rarity histogram can stay as-is)
+    # Rarity histogram over everything shown
     counts = rarity_counts(mundane_items + material_items + armor_items + weapon_items + magic_items)
+
+    def _count_crit(items):
+        return sum(1 for it in (items or []) if it.get("critical"))
 
     picked = {
         "mundane":   len(mundane_u),
         "materials": len(materials_u),
         "armor":     len(armor_u),
-        "weapons":   len(weapons_u),   # runed weapons excluded here
-        "magic":     len(magic_u),     # runed weapons included here
+        "weapons":   len(weapons_u),   # runed excluded here
+        "magic":     len(magic_u),     # runed included here
         "formulas":  len(result_formulas.get("items", [])),
-
-        # Critical counts: follow the same partition as above
         "critical": (
-            _count_crit(mundane_items) +
-            _count_crit(material_items) +
-            _count_crit(armor_items) +
-            _count_crit(weapons_nonruned) +
-            _count_crit(magic_armor) +
-            _count_crit(magic_weapons) +
-            _count_crit(magic_items) +
-            _count_crit(runed_weapons)
+            _count_crit(mundane_items)
+            + _count_crit(material_items)
+            + _count_crit(armor_items)
+            + _count_crit(weapons_nonruned)
+            + _count_crit(magic_armor)
+            + _count_crit(magic_weapons)
+            + _count_crit(magic_items)
+            + _count_crit(runed_weapons)
         ),
         "critical_mundane":      _count_crit(mundane_items),
         "critical_materials":    _count_crit(material_items),
         "critical_armor_shield": _count_crit(armor_items),
         "critical_weapons":      _count_crit(weapons_nonruned),
         "critical_magic":        (
-            _count_crit(magic_armor) +
-            _count_crit(magic_weapons) +
-            _count_crit(magic_items) +
-            _count_crit(runed_weapons)
+            _count_crit(magic_armor)
+            + _count_crit(magic_weapons)
+            + _count_crit(magic_items)
+            + _count_crit(runed_weapons)
         ),
     }
 
@@ -428,11 +412,10 @@ def query():
             "weapon_items": weapon_items,
             "magic_items": magic_items,
             "formula_items": result_formulas.get("items", []),
-        }
+        },
     }
 
-    # Publish a new roll id for live reloads
-    channel = (request.form.get("channel") or "default").strip().lower()
+    channel = (data.get("channel") or "default").strip().lower()
     roll_id = uuid.uuid4().hex[:12]
     _publish(channel, roll_id)
 
