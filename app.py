@@ -19,10 +19,9 @@ from services.logic import (
     select_magic_items, select_materials, CONFIG as LOGIC_CONFIG,
     select_formulas,
 )
-from services.utils import rarity_counts, aon_url
+from services.utils import rarity_counts, aon_url, aon_spell_url
 from services.spellbooks import select_spellbooks
 from services.spellbooks import build_spellbook
-from services.utils import aon_spell_url as aon_url 
 
 # Optional: debug blueprint (if exists)
 try:
@@ -42,12 +41,7 @@ DB_PATH = LOGIC_CONFIG.get("sqlite_db_path", "data/pf2e.sqlite")
 
 # ----------------------------
 # Helper utilities
-# ----------------------------
-def _open_db():
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    return conn
-    
+# ---------------------------- 
 def _norm_str(x):
     if x is None:
         return ""
@@ -205,10 +199,16 @@ def health_redirect():
 # ----------------------------
 # Routes
 # ----------------------------
-@app.post("/player-view")
+@app.route("/player-view", methods=["GET", "POST"])
 def player_view():
-    """Render player-facing page from an exact GM snapshot, with graceful fallback."""
-    raw = request.form.get("snapshot")
+    if request.method == "GET":
+        # Optional: allow snapshot via querystring ?snapshot=<json>
+        raw = request.args.get("snapshot")
+        if not raw:
+            # Lightweight explanation or redirect to /
+            return redirect("/")
+    else:
+        raw = request.form.get("snapshot")
     channel = (request.form.get("channel") or "default").strip().lower()
     roll_id = (request.form.get("roll_id") or "").strip()
 
@@ -226,7 +226,7 @@ def player_view():
                 # tolerate a flat snapshot (legacy format)
                 lists = {
                     "mundane_items":  snap.get("mundane_items", []),
-                    "material_items": snap.get("material_items", []) or snap.get("materials_items", []),
+                    "material_items": snap.get("material_items", []) or snap.get(
                     "armor_items":    snap.get("armor_items", []),
                     "weapon_items":   snap.get("weapon_items", []),
                     "magic_items":    snap.get("magic_items", []),
@@ -300,16 +300,17 @@ def index():
     )
 
 
-@app.route("/query", methods=["POST"])
+@app.route("/query", methods=["GET", "POST"])
 def query():
+    data = request.values  # works for both .args (GET) and .form (POST)
     df = load_items()
 
     # Inputs from the form
-    shop_type = (request.form.get("shop_type") or "").strip()
-    shop_size = (request.form.get("shop_size") or "medium").strip().lower()
-    disposition = (request.form.get("disposition") or "fair").strip().lower()
+    shop_type   = (data.get("shop_type") or "").strip()
+    shop_size   = (data.get("shop_size") or "medium").strip().lower()
+    disposition = (data.get("disposition") or "fair").strip().lower()
     try:
-        party_level = int(request.form.get("party_level") or 5)
+        party_level = int(data.get("party_level") or 5)
     except Exception:
         party_level = 5
 
@@ -479,56 +480,18 @@ def api_generate_spellbook():
         max_level = 1
 
     themes = [t.strip() for t in (data.get("themes") or []) if t and str(t).strip()]
-    themes_u = [t.upper() for t in themes]
+    spells = build_spellbook(tradition=tradition, book_level=max_level, themes=themes)
 
-    # Dynamic schema in case your table uses Rank instead of Level
-    def _schema(conn):
-        info = conn.execute("PRAGMA table_info(Spells)").fetchall()
-        cols = {r[1].lower(): r[1] for r in info}
-        def pick(*names, req=False, default=None):
-            for n in names:
-                if n in cols: return cols[n]
-            if req: raise RuntimeError(f"Missing required column (tried {names})")
-            return default
-        return {
-            "name": pick("name", "spell_name", req=True),
-            "rank": pick("rank", "level", "spell_level", req=True),
-            "trad": pick("tradition", "traditions", "magic_traditions", req=True),
-            "traits": pick("traits", "tags", default=None),  # used only for theme filter
-            "rarity": pick("rarity", default=None),          # <-- add this
-        }
-
-    with _open_db() as conn:
-        sc = _schema(conn)
-        sel = [
-            f"{sc['name']} AS name",
-            f"{sc['rank']} AS level",
-            f"{sc['trad']} AS traditions",
-            (f"{sc['traits']} AS traits" if sc['traits'] else "'' AS traits"),
-            (f"{sc['rarity']} AS rarity" if sc['rarity'] else "'Common' AS rarity"),  # <-- add this
-        ]
-        q = [f"SELECT {', '.join(sel)} FROM Spells WHERE {sc['rank']} <= ? AND UPPER({sc['trad']}) LIKE '%' || UPPER(?) || '%'"]
-        params = [max_level, tradition]
-        # ... keep your themes filter & ORDER BY ...
-
-        for name, level, trads, traits, rarity in conn.execute(sql, params):
-            rows.append({
-                "name": name,
-                "level": int(level or 0),
-                "traditions": trads or "",
-                "rarity": rarity or "Common",   # <-- include rarity per row
-                "aon_target": name,
-            })
-
-    return render_template(
+    html = render_template(
         "spellbook_page.html",
         spells=spells,
         tradition=tradition,
         max_level=max_level,
         themes=themes,
         aon_url=aon_url,
+        embed=True,  # render just the table section
     )
-    return jsonify(ok=True, count=len(rows), html=html)
+    return jsonify(ok=True, count=len(spells), html=html)
 
 @app.get("/spellbooks/view")
 def spellbooks_view():

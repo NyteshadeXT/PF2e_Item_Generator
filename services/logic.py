@@ -450,29 +450,6 @@ def _compose_weapon_name(it: dict) -> str:
     import re as _re
     return _re.sub(r"\s+", " ", " ".join([*parts, base]).strip())
 
-
-    ml = (it.get("_mat_label") or "").strip()
-    if not ml:
-        # heuristic recovery from name if a prior step already injected "(Material)"
-        ml = (_extract_material_label_from_name(it.get("name", "")) or "").strip()
-        if ml:
-            it["_mat_label"] = ml  # cache for any downstream use
-    if ml:
-        parts.append(ml)
-
-    adjs = it.get("_adj_labels") or []
-    if not adjs:
-        # try tags like "..., adjustment:Eyecatcher"
-        tags = str(it.get("tags", ""))
-        for tok in tags.split(","):
-            tok = tok.strip()
-            if tok.lower().startswith("adjustment:"):
-                adjs.append(tok.split(":", 1)[1].strip())
-    parts.extend([a for a in adjs if a])
-
-    full = " ".join([*parts, base]).strip()
-    return re.sub(r"\s+", " ", full)
-
 def _compose_armor_name(it: dict) -> str:
     """Rune (fundamental + properties) → Material → Adjustment(s) → Base."""
     base = (it.get("_base_name") or it.get("name") or "").strip()
@@ -1624,7 +1601,10 @@ def select_specific_magic_weapons(df, shop_type, party_level, shop_size, disposi
 def select_magic_items(df, shop_type, party_level, shop_size, disposition):
     return select_items_by_source(
         df=df,
-        source_tables=_group("magic", ["alchemical_items, cc_structure, consumables, grimoire, held_item, rune, snares, spellhearts, staff_wand, worn_items"]),
+        source_tables=_group("magic", [
+        "alchemical_items", "cc_structure", "consumables", "grimoire",
+        "held_item", "rune", "snares", "spellhearts", "staff_wand", "worn_items"
+        ]),
         item_type="magic",
         shop_type=shop_type, party_level=party_level,
         shop_size=shop_size, disposition=disposition, include_crit=True
