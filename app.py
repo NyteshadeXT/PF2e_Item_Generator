@@ -193,14 +193,19 @@ def version():
 
 
 # Optional: preserve the existing /health link in index.html
-@app.route("/health")
-def health_redirect():
-    return redirect("/debug/health", code=302)
+@app.get("/health")
+def health():
+    return {"ok": True}
+
 
 
 # ----------------------------
 # Routes
 # ----------------------------
+@app.get("/favicon.ico")
+def favicon():
+    return ("", 204)
+    
 @app.route("/player-view", methods=["GET", "POST"])
 def player_view():
     if request.method == "GET":
@@ -285,6 +290,20 @@ def player_view():
         roll_id=roll_id,
     )
 
+@app.get("/")
+def index():
+    df = load_items()
+    shop_types = get_shop_types(df)
+    dispositions = list(LOGIC_CONFIG.get("disposition_multipliers", {}).keys()) or ["fair"]
+    return render_template(
+        "index.html",
+        shop_types=shop_types,
+        shop_type=None,
+        shop_size="medium",
+        disposition="fair",
+        dispositions=dispositions,
+        party_level=5,
+    )
 
 @app.route("/query", methods=["GET", "POST"])
 def query():
