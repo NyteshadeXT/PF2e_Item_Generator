@@ -2,9 +2,10 @@
 <html>
 <head>
   <meta charset="utf-8" />
-  <title>Inventory Generator</title>
+  <title>Shop Inventory Generator</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <link rel="stylesheet" href="{{ url_for('static', filename='pf2e.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='spellbook.css') }}">
 </head>
 <body>
   <div class="pf-app">
@@ -100,7 +101,70 @@
         and use the CSV export to save a copy for your session notes.
       </div>
     </section>
+	
+	<section id="spellbook-generator" class="pf-card mt-16">
+	  <div class="pf-section__header">
+		<h2 style="margin:0;">Spellbook Generator</h2>
+	  </div>
+	  <div class="p-12">
+		<div class="pf-form-grid">
+		  <div class="pf-field">
+			<label class="pf-label">Magic Tradition</label>
+			<select id="sb-tradition" class="pf-select pf-select-lg">
+			  <option>Arcane</option>
+			  <option>Divine</option>
+			  <option>Occult</option>
+			  <option>Primal</option>
+			</select>
+		  </div>
+
+		  <div class="pf-field">
+			<label class="pf-label">Spellbook Level</label>
+			<input id="sb-max-level" class="pf-input pf-select-lg" type="number" min="1" max="10" value="5">
+		  </div>
+
+		  <div class="pf-field" style="grid-column:1 / -1;">
+			<label class="pf-label">Themes (traits)</label>
+			<input id="sb-themes" class="pf-input" type="text" placeholder="e.g., Cold, Fire, Healing">
+		  </div>
+		</div>
+
+		<div class="pf-actions">
+		  <button id="sb-generate" class="pf-btn pf-btn-primary" type="button">Generate Spellbook</button>
+		  <a href="/spellbooks" target="_blank" class="pf-btn">Open Full Page</a>
+		</div>
+
+		<div id="sb-output" class="pf-output"></div>
+	  </div>
+	</section>
 
   </div><!-- .pf-app -->
 </body>
+	<script>
+	(function () {
+	  const $trad   = document.getElementById('sb-tradition');
+	  const $level  = document.getElementById('sb-max-level');
+	  const $themes = document.getElementById('sb-themes');
+	  const $go     = document.getElementById('sb-generate');
+
+	  function openSpellbookPage() {
+		const themes = ($themes.value || '')
+		  .split(/[,\s]+/)
+		  .map(s => s.trim())
+		  .filter(Boolean)
+		  .join(',');
+
+		const params = new URLSearchParams({
+		  tradition: $trad.value,
+		  max_level: String(Number($level.value || 1)),
+		  themes
+		});
+
+		window.open(`/spellbooks/view?${params.toString()}`, '_blank', 'noopener');
+	  }
+
+	  $go?.addEventListener('click', openSpellbookPage);
+	})();
+	</script>
+
 </html>

@@ -2,18 +2,17 @@
 
 from flask import (
     Flask, render_template, request, send_file, redirect, abort,
-    Response, stream_with_context, current_app
+    Response, stream_with_context, current_app, jsonify
 )
-import io
-import csv
-import json
-import queue
-import time
-import uuid
+
+import io, csv, json, queue, time, uuid, sqlite3
+
+# Third-party
 import pandas as pd
 
-# Your project likely uses a "services" package; keep these imports as-is
+# Core project imports from the services package
 from services.db import load_items
+from pathlib import Path
 from services.logic import (
     select_mundane_items, select_weapons_items, select_armor_items,
     select_specific_magic_armor, select_specific_magic_weapons,
@@ -22,6 +21,8 @@ from services.logic import (
 )
 from services.utils import rarity_counts, aon_url
 from services.spellbooks import select_spellbooks
+from services.spellbooks import build_spellbook
+from services.utils import aon_spell_url as aon_url 
 
 # Optional: debug blueprint (if exists)
 try:
@@ -36,10 +37,17 @@ if debug_bp is not None:
 # Make AoN helper available in Jinja
 app.jinja_env.globals["aon_url"] = aon_url
 
+# use the already-imported LOGIC_CONFIG from services.logic
+DB_PATH = LOGIC_CONFIG.get("sqlite_db_path", "data/pf2e.sqlite")
 
 # ----------------------------
 # Helper utilities
 # ----------------------------
+def _open_db():
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    return conn
+    
 def _norm_str(x):
     if x is None:
         return ""
@@ -78,6 +86,18 @@ def _common_inputs():
         party_level = 5
     return shop_type, shop_size, disposition, party_level
 
+def _open_db():
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+def _row_has_all_themes(row_traits: str, themes: list[str]) -> bool:
+    """Case-insensitive AND filter: all theme terms must appear in the spell's traits"""
+    if not themes:
+        return True
+    traits = [t.strip().lower() for t in (row_traits or "").split(",")]
+    themes_norm = [x.strip().lower() for x in themes if x.strip()]
+    return all(any(theme in tr for tr in traits) for theme in themes_norm)
 
 def _build_payload(df, shop_type, shop_size, disposition, party_level):
     """Mirror results-building logic for a safe Player View fallback."""
@@ -436,47 +456,101 @@ def query():
         channel=channel,
     )
 
-
-@app.route("/export", methods=["POST"])
-def export_csv():
-    """
-    Accepts JSON payload with {"items": [...dicts...]} and returns a CSV.
-    You can POST the items currently shown on the Results page to this endpoint.
-    """
-    data = request.get_json(silent=True) or {}
-    items = data.get("items") or []
-
-    # CSV columns (order)
-    columns = ["Name", "Level", "Rarity", "Price", "Quantity", "Category"]
-
-    # Normalize keys from your item dicts
-    def row(i):
-        return [
-            i.get("name", ""),
-            i.get("level", ""),
-            i.get("rarity", ""),
-            i.get("price", ""),
-            i.get("quantity", ""),
-            i.get("category", ""),
-        ]
-
-    output = io.StringIO()
-    writer = csv.writer(output)
-    writer.writerow(columns)
-    for it in items:
-        writer.writerow(row(it))
-
-    mem = io.BytesIO()
-    mem.write(output.getvalue().encode("utf-8"))
-    mem.seek(0)
-    return send_file(
-        mem,
-        mimetype="text/csv",
-        as_attachment=True,
-        download_name="inventory.csv",
-        max_age=0,
+# Standalone Spellbook page
+@app.get("/spellbooks")
+def spellbooks_page():
+    return render_template(
+        "spellbook_page.html",
+        max_level=1,
+        aon_url=aon_url,
     )
 
+# JSON → fragment API for both the page and the mini-tool on index.html
+@app.post("/api/spellbooks/generate")
+def api_generate_spellbook():
+    data = request.get_json(force=True) or {}
+    tradition = (data.get("tradition") or "").strip().title()
+    if tradition not in ("Arcane", "Divine", "Occult", "Primal"):
+        return jsonify(ok=False, error="Invalid or missing tradition"), 400
+
+    try:
+        max_level = max(1, min(10, int(data.get("max_level") or 1)))
+    except Exception:
+        max_level = 1
+
+    themes = [t.strip() for t in (data.get("themes") or []) if t and str(t).strip()]
+    themes_u = [t.upper() for t in themes]
+
+    # Dynamic schema in case your table uses Rank instead of Level
+    def _schema(conn):
+        info = conn.execute("PRAGMA table_info(Spells)").fetchall()
+        cols = {r[1].lower(): r[1] for r in info}
+        def pick(*names, req=False, default=None):
+            for n in names:
+                if n in cols: return cols[n]
+            if req: raise RuntimeError(f"Missing required column (tried {names})")
+            return default
+        return {
+            "name": pick("name", "spell_name", req=True),
+            "rank": pick("rank", "level", "spell_level", req=True),
+            "trad": pick("tradition", "traditions", "magic_traditions", req=True),
+            "traits": pick("traits", "tags", default=None),  # used only for theme filter
+            "rarity": pick("rarity", default=None),          # <-- add this
+        }
+
+    with _open_db() as conn:
+        sc = _schema(conn)
+        sel = [
+            f"{sc['name']} AS name",
+            f"{sc['rank']} AS level",
+            f"{sc['trad']} AS traditions",
+            (f"{sc['traits']} AS traits" if sc['traits'] else "'' AS traits"),
+            (f"{sc['rarity']} AS rarity" if sc['rarity'] else "'Common' AS rarity"),  # <-- add this
+        ]
+        q = [f"SELECT {', '.join(sel)} FROM Spells WHERE {sc['rank']} <= ? AND UPPER({sc['trad']}) LIKE '%' || UPPER(?) || '%'"]
+        params = [max_level, tradition]
+        # ... keep your themes filter & ORDER BY ...
+
+        for name, level, trads, traits, rarity in conn.execute(sql, params):
+            rows.append({
+                "name": name,
+                "level": int(level or 0),
+                "traditions": trads or "",
+                "rarity": rarity or "Common",   # <-- include rarity per row
+                "aon_target": name,
+            })
+
+    return render_template(
+        "spellbook_page.html",
+        spells=spells,
+        tradition=tradition,
+        max_level=max_level,
+        themes=themes,
+        aon_url=aon_url,
+    )
+    return jsonify(ok=True, count=len(rows), html=html)
+
+@app.get("/spellbooks/view")
+def spellbooks_view():
+    tradition = (request.args.get("tradition") or "").strip().title()
+    try:
+        max_level = int(request.args.get("max_level") or 1)
+    except Exception:
+        max_level = 1
+
+    themes_raw = request.args.get("themes") or ""
+    themes = [t.strip() for t in themes_raw.split(",") if t.strip()]
+
+    spells = build_spellbook(tradition=tradition, book_level=max_level, themes=themes)
+
+    return render_template(
+        "spellbook_page.html",
+        spells=spells,
+        tradition=tradition,
+        max_level=max_level,
+        themes=themes,
+        aon_url=aon_url,
+    )
 
 if __name__ == "__main__":
     # For local dev convenience; in production use a WSGI server (gunicorn on Render)

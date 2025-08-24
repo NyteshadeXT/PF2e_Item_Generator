@@ -1,0 +1,75 @@
+{% set embed = embed|default(False) %}
+
+{% if not embed %}
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Spellbook</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="stylesheet" href="{{ url_for('static', filename='pf2e.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='spellbook.css') }}">
+</head>
+<body>
+  <div class="pf-app">
+    <header class="pf-page-header mt-16">
+      <div class="pf-page-header__inner">
+        <div class="pf-page-title">
+          <span class="pf-kicker">Pathfinder 2e Remaster</span>
+          <h1>Spellbook</h1>
+          <p class="pf-subtitle">
+            <span class="pf-chip">{{ tradition or "—" }}</span>
+            <span class="pf-chip">
+              Up to {{ max_level }}{% if max_level==1 %}st{% elif max_level==2 %}nd{% elif max_level==3 %}rd{% else %}th{% endif %} level
+            </span>
+            {% if themes %}<span class="pf-chip">Theme: {{ themes|join(', ') }}</span>{% endif %}
+          </p>
+        </div>
+        <nav class="pf-page-actions" aria-label="Actions">
+          <a class="pf-link-chip" href="/" title="Back to Item Generator">Back</a>
+          <button class="pf-link-chip" onclick="window.print()">Print</button>
+        </nav>
+      </div>
+    </header>
+{% endif %}
+
+<section class="pf-card mt-16">
+  <div class="pf-section__header"><h2 style="margin:0;">Spells</h2></div>
+
+  <div class="p-12">
+    <div class="pf-table-wrap">
+      <table class="pf-table zebra">
+        <thead>
+          <tr>
+            <th style="width: 40%">Name</th>
+            <th style="width: 10%; text-align:center;">Level</th>
+            <th style="width: 20%">Traditions</th>
+            <th style="width: 30%">Rarity</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for s in spells %}
+          <tr class="mi-row is-spellbook">
+            <td class="name-cell">
+              <a href="{{ aon_url(s.aon_target or s.name) }}" target="_blank" rel="noopener">{{ s.name }}</a>
+            </td>
+            <td style="text-align:center;">{{ s.level }}</td>
+            <td>{{ s.traditions or "—" }}</td>
+            <td>{{ (s.rarity or "Common") }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+
+      {% if not spells or not spells|length %}
+        <p class="empty">No spells matched your filters.</p>
+      {% endif %}
+    </div>
+  </div>
+</section>
+
+{% if not embed %}
+  </div> <!-- /.pf-app -->
+</body>
+</html>
+{% endif %}

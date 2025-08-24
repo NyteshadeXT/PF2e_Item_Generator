@@ -3,9 +3,7 @@
 # Spellbook generator for the PF2e Item Generator (Remaster rules)
 from __future__ import annotations
 
-import random
-import sqlite3
-import uuid
+import random, sqlite3, uuid
 from typing import Dict, List, Tuple, Optional
 
 
@@ -259,4 +257,112 @@ def select_spellbooks(
     if conn:
         conn.close()
     return {"items": items, "base_count": len(items), "critical_added": 0}
+
+
+# --- Standalone Spellbook builder (for the new page) -------------------------
+
+def build_spellbook(
+    *,
+    tradition: str,
+    book_level: int,
+    themes: Optional[List[str]] = None,
+    sqlite_path: Optional[str] = None,
+) -> List[Dict]:
+    """
+    Return a flat list of spells for a single spellbook, honoring the same per-rank counts
+    used by select_spellbooks(), but for an explicit tradition + book level.
+    Each spell = { name, level, traditions, traits, aon_target }
+    """
+    tradition = (tradition or "").strip().title()
+    if tradition not in TRADITIONS:
+        return []
+
+    try:
+        L = max(1, min(20, int(book_level or 1)))
+    except Exception:
+        L = 1
+
+    # normalize themes
+    themes_norm = []
+    if themes:
+        themes_norm = [t.strip().upper() for t in themes if str(t).strip()]
+
+    path = sqlite_path or CONFIG.get("sqlite_db_path")
+    try:
+        conn = sqlite3.connect(path)
+    except Exception:
+        return []
+
+    counts = _counts_for_book_level(L)
+    chosen_set: set[str] = set()
+    picked: List[Dict] = []
+
+    def _pool_for(rank: int, rarity: str) -> List[Dict]:
+        cur = conn.cursor()
+        # include Traits for optional theme filtering
+        q = """
+            SELECT
+              Name        AS name,
+              Rank        AS level,
+              Tradition   AS traditions,
+              Rarity      AS rarity,
+              COALESCE(Traits, '') AS traits
+            FROM Spells
+            WHERE Rank = ?
+              AND (UPPER(Tradition) LIKE '%' || UPPER(?) || '%')
+              AND Rarity = ?
+        """
+        cur.execute(q, (rank, tradition, rarity))
+        rows = [dict(zip([c[0] for c in cur.description], r)) for r in cur.fetchall()]
+        if themes_norm:
+            rows = [
+                r for r in rows
+                if any(t in (r.get("traits") or "").upper() for t in themes_norm)
+            ]
+        return rows
+
+    try:
+        for rank in range(1, 11):
+            need = int(counts.get(rank, 0) or 0)
+            safety = 1000
+            while need > 0 and safety > 0:
+                rarity = _roll_rarity()
+                pool = _pool_for(rank, rarity)
+
+                # fallback: try any rarity if the filtered pool is empty
+                if not pool:
+                    any_pool: List[Dict] = []
+                    for rar in ("Common", "Uncommon", "Rare"):
+                        any_pool.extend(_pool_for(rank, rar))
+                    pool = any_pool
+
+                if not pool:
+                    break
+
+                pick = random.choice(pool)
+                name = (pick.get("name") or "").strip()
+                if not name or name in chosen_set:
+                    safety -= 1
+                    continue
+
+                chosen_set.add(name)
+                # normalize keys for the fragment template
+                picked.append({
+                    "name": name,
+                    "level": int(pick.get("level") or 0),
+                    "traditions": pick.get("traditions") or "",
+                    "traits": pick.get("traits") or "",
+                    "rarity": pick.get("rarity") or "Common",
+                    "aon_target": name,   # for aon URL helper
+                })
+                need -= 1
+                safety -= 1
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+    picked.sort(key=lambda x: (x.get("level", 0), x.get("name", "")))
+    return picked
 
