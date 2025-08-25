@@ -106,23 +106,30 @@
                   <th>Price</th>
                   <th>Quantity</th>
                   <th>Category</th>
+				  <th>Source</th>
                 </tr>
               </thead>
               <tbody>
                 {% for it in mundane_items %}
                 <tr>
-                  <td>
-                    <a href="{{ aon_url(it.aon_target or it.name) }}" target="_blank" rel="noopener">{{ it.name }}</a>
-                    {% if it.critical %}<span class="badge critical" style="margin-left:6px;">Critical</span>{% endif %}
-                  </td>
-                  <td>{{ it.level }}</td>
-                  <td>
-                    {% set r = (it.rarity or 'Common')|lower %}
-                    <span class="badge rarity-chip {{ r }}">{{ it.rarity or 'Common' }}</span>
-                  </td>
+				<td>
+				  <a href="{{ aon_url(it.aon_target or it.name) }}" target="_blank" rel="noopener">{{ it.name }}</a>
+				  {% if it.critical %}
+					<span class="badge critical" style="margin-left:6px;">Critical</span>
+				  {% endif %}
+				  {% if it.is_3pp %}
+					<span class="badge thirdparty" title="Third-Party Publisher" style="margin-left:6px;">3PP</span>
+				  {% endif %}
+				</td>
+				<td>{{ it.level }}</td>
+				<td>
+				  {% set r = (it.rarity or 'Common')|lower %}
+				  <span class="badge rarity-chip {{ r }}">{{ it.rarity or 'Common' }}</span>
+				</td>
                   <td>{{ it.price }}</td>
                   <td>{{ it.quantity }}</td>
                   <td>{{ it.category }}</td>
+				  <td>{{ it.Source or "—" }}</td>
                 </tr>
                 {% endfor %}
               </tbody>
@@ -149,23 +156,30 @@
                   <th>Price</th>
                   <th>Quantity</th>
                   <th>Category</th>
+				  <th>Source</th>
                 </tr>
               </thead>
               <tbody>
                 {% for it in material_items %}
-                  <tr>
-                    <td>
-                      <a href="{{ aon_url(it.aon_target or it.name) }}" target="_blank" rel="noopener">{{ it.name }}</a>
-                      {% if it.critical %}<span class="badge critical" style="margin-left:6px;">Critical</span>{% endif %}
-                    </td>
-                    <td>{{ it.level }}</td>
-                    <td>
-                      {% set r = (it.rarity or 'Common')|lower %}
-                      <span class="badge rarity-chip {{ r }}">{{ it.rarity or 'Common' }}</span>
-                    </td>
+					<tr>
+					<td>
+					  <a href="{{ aon_url(it.aon_target or it.name) }}" target="_blank" rel="noopener">{{ it.name }}</a>
+					  {% if it.critical %}
+						<span class="badge critical" style="margin-left:6px;">Critical</span>
+					  {% endif %}
+					  {% if it.is_3pp %}
+						<span class="badge thirdparty" title="Third-Party Publisher" style="margin-left:6px;">3PP</span>
+					  {% endif %}
+					</td>
+					<td>{{ it.level }}</td>
+					<td>
+					  {% set r = (it.rarity or 'Common')|lower %}
+					  <span class="badge rarity-chip {{ r }}">{{ it.rarity or 'Common' }}</span>
+					</td>
                     <td>{{ it.price }}</td>
                     <td>{{ it.quantity }}</td>
                     <td>{{ it.category }}</td>
+					<td>{{ it.Source or "—" }}</td>
                   </tr>
                 {% endfor %}
               </tbody>
@@ -192,23 +206,30 @@
                   <th>Price</th>
                   <th>Quantity</th>
                   <th>Category</th>
+				  <th>Source</th>
                 </tr>
               </thead>
               <tbody>
                 {% for it in formula_items %}
-                  <tr>
-                    <td>
-                      <a href="{{ aon_url(it.aon_target or it.name) }}" target="_blank" rel="noopener">{{ it.name }}</a>
-                      {% if it.critical %}<span class="badge critical" style="margin-left:6px;">Critical</span>{% endif %}
-                    </td>
-                    <td>{{ it.level }}</td>
-                    <td>
-                      {% set r = (it.rarity or 'Common')|lower %}
-                      <span class="badge rarity-chip {{ r }}">{{ it.rarity or 'Common' }}</span>
-                    </td>
+					<tr>
+					<td>
+					  <a href="{{ aon_url(it.aon_target or it.name) }}" target="_blank" rel="noopener">{{ it.name }}</a>
+					  {% if it.critical %}
+						<span class="badge critical" style="margin-left:6px;">Critical</span>
+					  {% endif %}
+					  {% if it.is_3pp %}
+						<span class="badge thirdparty" title="Third-Party Publisher" style="margin-left:6px;">3PP</span>
+					  {% endif %}
+					</td>
+					<td>{{ it.level }}</td>
+					<td>
+					  {% set r = (it.rarity or 'Common')|lower %}
+					  <span class="badge rarity-chip {{ r }}">{{ it.rarity or 'Common' }}</span>
+					</td>
                     <td>{{ it.price }}</td>
                     <td>{{ it.quantity }}</td>
                     <td>{{ it.category }}</td>
+					<td>{{ it.Source or "—" }}</td>
                   </tr>
                 {% endfor %}
               </tbody>
@@ -235,6 +256,7 @@
                   <th>Price</th>
                   <th>Quantity</th>
                   <th>Category</th>
+				  <th>Source</th>
                 </tr>
               </thead>
               <tbody>
@@ -255,15 +277,19 @@
                       {% if it.is_material or ('material:' in (it.tags or '')|lower) %}
                         <span class="badge material" style="margin-left:6px;">Material</span>
                       {% endif %}
-                    </td>
+					  {% if it.is_3pp %}
+						<span class="badge thirdparty" title="Third-Party Publisher" style="margin-left:6px;">3PP</span>
+					  {% endif %}
+					</td>
                     <td>{{ it.level }}</td>
-                    <td>
-                      {% set r = (it.rarity or 'Common')|lower %}
-                      <span class="badge rarity-chip {{ r }}">{{ it.rarity or 'Common' }}</span>
-                    </td>
+				    <td>
+				      {% set r = (it.rarity or 'Common')|lower %}
+				      <span class="badge rarity-chip {{ r }}">{{ it.rarity or 'Common' }}</span>
+				    </td>
                     <td>{{ it.price }}</td>
                     <td>{{ it.quantity }}</td>
                     <td>{{ it.category }}</td>
+					<td>{{ it.Source or "—" }}</td>
                   </tr>
                 {% endfor %}
               </tbody>
@@ -290,6 +316,7 @@
                   <th>Price</th>
                   <th>Quantity</th>
                   <th>Category</th>
+				  <th>Source</th>
                 </tr>
               </thead>
               <tbody>
@@ -310,15 +337,19 @@
                       {% if it.is_material or ('material:' in (it.tags or '')|lower) %}
                         <span class="badge material" style="margin-left:6px;">Material</span>
                       {% endif %}
-                    </td>
+					  {% if it.is_3pp %}
+						<span class="badge thirdparty" title="Third-Party Publisher" style="margin-left:6px;">3PP</span>
+					  {% endif %}
+					</td>
                     <td>{{ it.level }}</td>
-                    <td>
-                      {% set r = (it.rarity or 'Common')|lower %}
-                      <span class="badge rarity-chip {{ r }}">{{ it.rarity or 'Common' }}</span>
-                    </td>
+				    <td>
+				      {% set r = (it.rarity or 'Common')|lower %}
+				      <span class="badge rarity-chip {{ r }}">{{ it.rarity or 'Common' }}</span>
+				    </td>
                     <td>{{ it.price }}</td>
                     <td>{{ it.quantity }}</td>
                     <td>{{ it.category }}</td>
+					<td>{{ it.Source or "—" }}</td>
                   </tr>
                 {% endfor %}
               </tbody>
@@ -332,10 +363,7 @@
 
     <!-- Magic -->
     <section id="Magic" class="pf-card mt-16">
-      <div class="pf-section__header">
-        <h2 id="Magic" class="pf-section__title">Magic Items</h2>
-        <a href="#top" class="pf-link-chip pf-top-link" aria-label="Back to top">↑ Top</a>
-      </div>
+		<div class="pf-section__header"><h2 style="margin:0;">Magic Items</h2><a href="#top" class="pf-link-chip" style="float: right;">↑ Top</a></div>
       {% if magic_items %}
         <div class="p-12">
           <div class="pf-table-wrap">
@@ -348,6 +376,7 @@
                   <th>Price</th>
                   <th>Quantity</th>
                   <th>Category</th>
+				  <th>Source</th>
                 </tr>
               </thead>
               <tbody>
@@ -356,30 +385,42 @@
                   {% set c = ((it.category or '')|string)|lower %}
                   {% set is_sb = ('spellbook' in c) or (n[:9] == 'spellbook') %}
 
-                  <tr class="mi-row {% if is_sb %}is-spellbook{% endif %}">
-                    <td class="name-cell">
-                      {% if is_sb and it.details_html %}
-                        <details class="mi-accordion">
-                          <summary>
-                            <a href="{{ aon_url(it.aon_target or it.name) }}" target="_blank" rel="noopener">{{ it.name }}</a>
-                            {% if it.critical %}<span class="badge critical" style="margin-left:6px;">Critical</span>{% endif %}
-                          </summary>
-                          {{ it.details_html | safe }}
-                        </details>
-                      {% else %}
-                        <a href="{{ aon_url(it.aon_target or it.name) }}" target="_blank" rel="noopener">{{ it.name }}</a>
-                        {% if it.critical %}<span class="badge critical" style="margin-left:6px;">Critical</span>{% endif %}
-                      {% endif %}
-                    </td>
-                    <td>{{ it.level }}</td>
-                    <td>
-                      {% set r = (it.rarity or 'Common')|lower %}
-                      <span class="badge rarity-chip {{ r }}">{{ it.rarity or 'Common' }}</span>
-                    </td>
-                    <td>{{ it.price }}</td>
-                    <td>{{ it.quantity }}</td>
-                    <td>{{ it.category }}</td>
-                  </tr>
+					<tr class="mi-row {% if is_sb %}is-spellbook{% endif %}">
+					  <td class="name-cell">
+						{% if is_sb and it.details_html %}
+						  <details class="mi-accordion">
+							<summary>
+							  <a href="{{ aon_url(it.aon_target or it.name) }}" target="_blank" rel="noopener">{{ it.name }}</a>
+							  {% if it.critical %}
+								<span class="badge critical" style="margin-left:6px;">Critical</span>
+							  {% endif %}
+							  {% if it.is_3pp %}
+								<span class="badge thirdparty" title="Third‑Party Publisher" style="margin-left:6px;">3PP</span>
+							  {% endif %}
+							</summary>
+							{{ it.details_html | safe }}
+						  </details>
+						{% else %}
+						  <a href="{{ aon_url(it.aon_target or it.name) }}" target="_blank" rel="noopener">{{ it.name }}</a>
+						  {% if it.critical %}
+							<span class="badge critical" style="margin-left:6px;">Critical</span>
+						  {% endif %}
+						  {% if it.is_3pp %}
+							<span class="badge thirdparty" title="Third‑Party Publisher" style="margin-left:6px;">3PP</span>
+						  {% endif %}
+						{% endif %}
+					  </td>
+
+					  <td>{{ it.level }}</td>
+					  <td>
+						{% set r = (it.rarity or 'Common')|lower %}
+						<span class="badge rarity-chip {{ r }}">{{ it.rarity or 'Common' }}</span>
+					  </td>
+					  <td>{{ it.price }}</td>
+					  <td>{{ it.quantity }}</td>
+					  <td>{{ it.category }}</td>
+					  <td>{{ it.Source or "—" }}</td>
+					</tr>
                 {% endfor %}
               </tbody>
             </table>

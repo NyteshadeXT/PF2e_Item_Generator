@@ -183,6 +183,13 @@ a:hover, a:focus-visible { color: var(--pf-primary); text-decoration: underline;
   font-weight: 700;
 }
 
+.badge.thirdparty {
+  background: #f9e0a3;    /* parchment gold */
+  border-color: #d4b464;
+  color: #5a3d00;
+  font-weight: 700;
+}
+
 .rarity-chip{ font-weight: 600; }
 .rarity-chip.common   { background: #e9e4da; color: #413a31; }
 .rarity-chip.uncommon { background: #f2e3bf; color: #5a4516; border-color: #e5c97a; }

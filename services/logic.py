@@ -307,15 +307,20 @@ def _aggregate_items(rows_base, rows_crit, disposition: str) -> list[dict]:
         name = (r.get("name") or "").strip()
         if not name:
             return
-        # NEW: allow callers to provide a custom dedupe key
+
+        # Carry Source and detect 3PP on a per-row basis
+        src = (r.get("Source") or r.get("source") or "").strip()
+        pub = (r.get("Publisher_Source") or r.get("publisher_source") or "").strip().lower()
+        is_3pp = pub in ("3rd party", "3rd-party", "third party", "3pp")
+
+        # Use custom dedupe key if present
         key_name = str(r.get("_dedupe_key") or name).strip()
         key = (key_name, bool(is_crit))
         qtys[key] += 1
         crit_flags[key] = crit_flags[key] or bool(is_crit)
+
         if key not in bucket:
-            # Copy all original fields from the first occurrence
-            bucket[key] = dict(r)
-            # Overwrite fields for display
+            bucket[key] = dict(r)  # keep originals as a base
             bucket[key].update({
                 "name": name,
                 "level": int(r.get("level", 0) or 0),
@@ -325,9 +330,16 @@ def _aggregate_items(rows_base, rows_crit, disposition: str) -> list[dict]:
                 "category": r.get("category", ""),
                 "critical": bool(is_crit),
             })
-
-    for r in rows_base: _add(r, False)
-    for r in rows_crit: _add(r, True)
+            # Persist Source and 3PP flag on the display dict
+            if src:
+                bucket[key]["Source"] = src
+            if is_3pp:
+                bucket[key]["is_3pp"] = True
+                
+    for r in rows_base:
+        _add(r, False)
+    for r in rows_crit:
+        _add(r, True)
 
     items: list[dict] = []
     for key, it in bucket.items():
@@ -897,7 +909,7 @@ def _select_items_core(
 
     d = normalize_str_columns(df, [
         "category", "source_table", "name", "rarity", "price_text",
-        "tags", "shop_type", "Bulk", "Source", "subtype"
+        "tags", "shop_type", "Bulk", "Source", "subtype", "Publisher_Source"
     ])
     d = _filter_source_tables(d, source_tables)
     d = _apply_shop_type_exact(d, shop_type)

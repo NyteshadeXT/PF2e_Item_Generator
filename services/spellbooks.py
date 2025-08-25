@@ -306,7 +306,8 @@ def build_spellbook(
               Rank        AS level,
               Tradition   AS traditions,
               Rarity      AS rarity,
-              COALESCE(Traits, '') AS traits
+              COALESCE(Traits, '') AS traits,
+              COALESCE(Source, '') AS source 
             FROM Spells
             WHERE Rank = ?
               AND (UPPER(Tradition) LIKE '%' || UPPER(?) || '%')
