@@ -1,0 +1,62 @@
+/* Magic Item Builder */
+.mib-grid { display: grid; grid-template-columns: repeat(12, minmax(0,1fr)); gap: 12px; }
+.mib-col-6 { grid-column: span 6 / span 6; }
+.mib-col-12 { grid-column: 1 / -1; }
+.mib-output { margin-top: 12px; }
+.mib-card { border: 1px solid var(--pf-border, #2a2a2a); border-radius: 12px; padding: 12px; }
+.mib-props { margin-top: 6px; font-size: .95rem; opacity: .9; }
+.mib-badges .badge { display:inline-block; padding: 2px 8px; border-radius: 999px; margin-right: 6px; background: #2f2f2f; }
+.mib-help { color: #9aa; font-size: .9rem; margin-top: 6px; }
+
+/* --- Magic Item Builder pill styling (gold, like Inventory Generator) --- */
+.mib-card .mib-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+
+.mib-card .mib-badges .badge {
+  display: inline-block;
+  padding: 2px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.6;
+  background: #F7E3A0;          /* gold */
+  color: #3A2D00;               /* dark text for contrast */
+  border: 1px solid #E2C463;    /* subtle gold border */
+}
+
+/* Property rune tags: lighter/neutral so the top pills pop */
+.mib-card .mib-props {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.mib-card .mib-props .badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 500;
+  background: #EEF2F6;          /* soft gray-blue */
+  color: #0F172A;               /* slate-900 */
+  border: 1px solid #CBD5E1;    /* slate-300 */
+}
+
+/* Dark mode polish */
+@media (prefers-color-scheme: dark) {
+  .mib-card .mib-badges .badge {
+    background: #7C6400;        /* deep gold */
+    color: #FFF8DB;             /* warm light */
+    border-color: #A68C27;
+  }
+  .mib-card .mib-props .badge {
+    background: #1F2937;        /* slate-800 */
+    color: #E5E7EB;             /* gray-200 */
+    border-color: #374151;      /* slate-700 */
+  }
+}

@@ -5,7 +5,7 @@ from flask import (
     Response, stream_with_context, current_app, jsonify
 )
 
-import io, csv, json, queue, time, uuid, sqlite3
+import io, csv, json, queue, time, uuid, sqlite3, re, random
 
 # Third-party
 import pandas as pd
@@ -17,13 +17,14 @@ from services.logic import (
     select_mundane_items, select_weapons_items, select_armor_items,
     select_specific_magic_armor, select_specific_magic_weapons,
     select_magic_items, select_materials, CONFIG as LOGIC_CONFIG,
-    select_formulas,
+    select_formulas, apply_weapon_runes, apply_armor_runes, apply_shield_runes,
+    GROUPS as ST_GROUPS, _load_runes_df, _compose_weapon_name, _compose_armor_name
 )
 from services.utils import rarity_counts, aon_url
 from services.spellbooks import select_spellbooks
 from services.spellbooks import build_spellbook
-# from services.utils import aon_spell_url
-
+    
+from copy import deepcopy
 
 # Optional: debug blueprint (if exists)
 try:
@@ -116,6 +117,94 @@ def _build_payload(df, shop_type, shop_size, disposition, party_level):
         "window": window,
     }
 
+# --- Magic Item Builder: ONLY override fundamental apply_rate ---------------
+from copy import deepcopy
+from flask import request
+
+_FUND_KEYS   = {"fundamental", "fundamentals", "baseline"}  # common container keys
+_PROP_KEYS   = {"property", "properties", "property_runes", "weapon_properties", "armor_properties"}
+_FUND_LABELS = {"fundamental"}  # for fields like group/category/type/rune_type
+# Names that are clearly fundamentals in PF2e remaster (best-effort, safe to include)
+_FUND_NAME_HINTS = {"weapon potency", "armor potency", "shield potency", "striking", "resilient", "reinforcing"}
+
+def _looks_fundamental_node(node: dict) -> bool:
+    """Heuristic: is this node describing fundamental runes?"""
+    if not isinstance(node, dict):
+        return False
+    # explicit flags in the node
+    for k in ("group", "category", "type", "rune_type", "slot", "class"):
+        v = str(node.get(k) or "").strip().lower()
+        if v in _FUND_LABELS:
+            return True
+    # name-based hint (e.g., "Armor Potency +1", "Striking", etc.)
+    name = str(node.get("name") or "").strip().lower()
+    if any(h in name for h in _FUND_NAME_HINTS):
+        return True
+    return False
+
+def _force_fundamental_apply_rate_only(cfg, rate: float = 1.0):
+    """
+    Recursively walk a rune config and set apply_rate ONLY on 'fundamental' sections.
+    Property rune rates are not modified.
+    Supports several config shapes:
+      - item_runes = { fundamental: {...}, properties: {...} }
+      - item_runes = { groups: [{group:'fundamental', ...}, {group:'property', ...}] }
+      - item_runes = { fundamental_apply_rate: X, property_apply_rate: Y, ... }
+      - nested dict/list structures where a node advertises fundamental via fields
+    """
+    if isinstance(cfg, dict):
+        # Case A: explicit top-level scalar controls
+        if "fundamental_apply_rate" in cfg:
+            cfg["fundamental_apply_rate"] = rate
+        # NOTE: intentionally DO NOT touch property_apply_rate
+        # if "property_apply_rate" in cfg: (leave it alone)
+
+        # Case B: direct 'fundamental' container
+        for k, v in list(cfg.items()):
+            kl = str(k).strip().lower()
+            if kl in _FUND_KEYS:
+                _force_fundamental_apply_rate_only(v, rate)  # recurse into fundamental subtree
+                # also set rate on the container itself if it has an apply_rate
+                if isinstance(v, dict) and "apply_rate" in v:
+                    v["apply_rate"] = rate
+                continue
+
+            # Skip known property containers entirely
+            if kl in _PROP_KEYS:
+                # do NOT recurse into property* containers
+                continue
+
+            # Generic recursion: if this node itself declares it's fundamental, set its rate
+            if isinstance(v, dict):
+                if _looks_fundamental_node(v) and "apply_rate" in v:
+                    v["apply_rate"] = rate
+                _force_fundamental_apply_rate_only(v, rate)
+            elif isinstance(v, list):
+                _force_fundamental_apply_rate_only(v, rate)
+
+    elif isinstance(cfg, list):
+        for x in cfg:
+            if isinstance(x, dict):
+                # Grouped configs: [{group:'fundamental', apply_rate: ...}, ...]
+                if _looks_fundamental_node(x) and "apply_rate" in x:
+                    x["apply_rate"] = rate
+            _force_fundamental_apply_rate_only(x, rate)
+
+def _runes_cfg_for_request(item_type: str) -> dict:
+    """
+    Build the runes config for this request:
+      - Start from LOGIC_CONFIG[item_type+'_runes'] (or LOGIC_CONFIG['runes']).
+      - If the caller is the Magic Item Builder, force ONLY fundamental apply_rate=100%.
+      - Leave property rune rates untouched.
+    """
+    base = deepcopy(
+        LOGIC_CONFIG.get(f"{item_type}_runes")
+        or LOGIC_CONFIG.get("runes")
+        or {}
+    )
+    if request.path.startswith("/api/magic-builder/"):
+        _force_fundamental_apply_rate_only(base, 1.0)
+    return base
 
 # ----------------------------
 # Real-time broadcaster (SSE)
@@ -517,6 +606,263 @@ def spellbooks_view():
         themes=themes,
         aon_url=aon_url,
     )
+
+# --- Magic Item Builder API ----------------------------------------------
+def _norm(s):
+    return (str(s or "").strip().lower())
+
+def _st_norm(s: str) -> str:
+    import re
+    # collapse to snake-ish: "Specific Magic Weapons" -> "specific_magic_weapons"
+    return re.sub(r'[^a-z0-9]+', '_', str(s or '').lower()).strip('_')
+
+def _is_shield_row(row: dict) -> bool:
+    sub = _norm(row.get("subtype") or row.get("Subtype"))
+    cat = _norm(row.get("category"))
+    nm  = _norm(row.get("name"))
+    return ("shield" in sub) or ("shield" in cat) or ("shield" in nm)
+
+# --- Magic Item Builder: robust base-name provider --------------------------
+def _lc(s): return str(s or "").strip().lower()
+def _tokset(val: str) -> set[str]:
+    return set(re.findall(r"[a-z0-9]+", str(val or "").lower()))
+
+def _st_norm(s: str) -> str:
+    return re.sub(r'[^a-z0-9]+', '_', str(s or '').lower()).strip('_')
+
+def _filter_by_sources(d: pd.DataFrame, prefer: list[str], fallback_group: str|None) -> pd.DataFrame:
+    """Filter by normalized source_table; if empty, optionally fallback to ST_GROUPS[fallback_group]."""
+    d = d.copy()
+    d["__st"] = d["source_table"].astype(str).map(_st_norm)
+    want = {_st_norm(x) for x in prefer}
+    out = d[d["__st"].isin(want)]
+    if out.empty and fallback_group and fallback_group in ST_GROUPS:
+        alts = {_st_norm(x) for x in ST_GROUPS.get(fallback_group, [])}
+        out = d[d["__st"].isin(alts)]
+    return out
+
+@app.get("/api/magic-builder/bases")
+def api_mib_bases():
+    try:
+        t          = _lc(request.args.get("type"))
+        max_level  = int(request.args.get("max_level") or 1)
+        subtype_in = _lc(request.args.get("subtype"))
+        armor_in   = _lc(request.args.get("armor_type"))
+
+        if t not in ("weapon","armor","shield"):
+            return jsonify(ok=False, error="Invalid type"), 400
+
+        df = load_items()
+        if df is None or df.empty:
+            current_app.logger.info("mib_bases: no data")
+            return jsonify(ok=True, names=[])
+
+        d = df.copy()
+        # normalize columns we need
+        for col in ("name","category","type","source_table","level"):
+            if col not in d.columns:
+                d[col] = ""
+        d["name"]        = d["name"].astype(str).str.strip()
+        d["category_lc"] = d["category"].astype(str).str.strip().str.lower()
+        d["itype"]       = d["type"].astype(str).str.strip().str.lower()
+        d["source_table"]= d["source_table"].astype(str).str.strip()
+        d["level"]       = pd.to_numeric(d["level"], errors="coerce").fillna(0).astype(int)
+
+        # level cap
+        d = d[d["level"] <= max_level]
+
+        # prefer exact source tables; fallback to your ST_GROUPS if empty
+        if t == "weapon":
+            pool = _filter_by_sources(d, ["weapon_basic"], "weapons")
+            pool = pool[pool["category_lc"].str.contains("weapon", na=False)]
+            if subtype_in:
+                eq = pool["itype"].eq(subtype_in)
+                if not eq.any():
+                    toks = set(re.findall(r"[a-z0-9]+", subtype_in))
+                    eq = pool["itype"].apply(lambda v: toks.issubset(set(re.findall(r"[a-z0-9]+", v))))
+                pool = pool[eq]
+
+        elif t == "armor":
+            pool = _filter_by_sources(d, ["armor_basic"], "armor")
+            pool = pool[pool["category_lc"].str.contains("armor", na=False) & ~pool["category_lc"].str.contains("shield", na=False)]
+            if armor_in in ("light","medium","heavy"):
+                expected = f"{armor_in} armor"
+                eq = pool["itype"].eq(expected)
+                if not eq.any():
+                    eq = pool["itype"].str.contains(rf"\b{re.escape(armor_in)}\b", na=False)
+                pool = pool[eq]
+
+        else:  # shield
+            # ✅ use shield_basic for shields
+            pool = _filter_by_sources(d, ["shield_basic"], "shields" if "shields" in ST_GROUPS else "armor")
+            # If we had to fall back (no shield_basic rows), tighten by 'shield' keywords
+            if not pool["source_table"].str.contains("shield_basic", case=False, na=False).any():
+                is_shield = (
+                    pool["category_lc"].str.contains("shield", na=False)
+                    | pool["itype"].str.contains("shield", na=False)
+                    | pool["name"].str.lower().str.contains("shield", na=False)
+                )
+                pool = pool[is_shield]
+
+        names = sorted(pool["name"].dropna().unique().tolist())[:200]
+        if not names:
+            # helpful logging to see what's in the pool
+            current_app.logger.info("mib_bases: type=%s subtype=%s armor=%s max=%s -> 0 names; sample itype: %s; sample sources: %s",
+                                    t, subtype_in, armor_in, max_level,
+                                    pool["itype"].value_counts().head(10).to_dict(),
+                                    pool["source_table"].value_counts().head(10).to_dict())
+        else:
+            current_app.logger.info("mib_bases: type=%s subtype=%s armor=%s max=%s -> %d names",
+                                    t, subtype_in, armor_in, max_level, len(names))
+        return jsonify(ok=True, names=names)
+
+    except Exception as e:
+        current_app.logger.exception("mib_bases error")
+        return jsonify(ok=False, error=str(e)), 500
+
+        
+@app.post("/api/magic-builder/build")
+def api_mib_build():
+    data = request.get_json(force=True) or {}
+    t = (data.get("item_type") or "").strip().lower()
+    try:
+        L = int(data.get("max_level") or 1)
+    except Exception:
+        L = 1
+    base_name = (data.get("base_name") or "").strip()
+
+    if t not in ("weapon","armor","shield"):
+        return jsonify(ok=False, error="Invalid item_type"), 400
+    if not base_name:
+        return jsonify(ok=False, error="Missing base_name"), 400
+
+    df = load_items()
+    if df is None or df.empty:
+        return jsonify(ok=False, error="No data loaded"), 500
+
+    d = df.copy()
+    for col in ("name","category","type","source_table","level","rarity","price_text","Bulk","Source","tags"):
+        if col not in d.columns:
+            d[col] = ""
+    d["name"]        = d["name"].astype(str).str.strip()
+    d["category_lc"] = d["category"].astype(str).str.strip().str.lower()
+    d["itype"]       = d["type"].astype(str).str.strip().str.lower()
+    d["source_lc"]   = d["source_table"].astype(str).str.strip().str.lower()
+    d["level"]       = pd.to_numeric(d["level"], errors="coerce").fillna(0).astype(int)
+
+    # Narrow to proper base pool (prefer exact table; fallback to group)
+    if t == "weapon":
+        pool = _filter_by_sources(d, ["weapon_basic"], "weapons")
+        pool = pool[pool["category_lc"].str.contains("weapon", na=False)]
+
+    elif t == "armor":
+        pool = _filter_by_sources(d, ["armor_basic"], "armor")
+        pool = pool[pool["category_lc"].str.contains("armor", na=False) & ~pool["category_lc"].str.contains("shield", na=False)]
+
+    else:  # shield
+        pool = _filter_by_sources(d, ["shield_basic"], "shields" if "shields" in ST_GROUPS else "armor")
+        if not pool["source_table"].str.contains("shield_basic", case=False, na=False).any():
+            # tighten only when we had to fall back
+            is_shield = (
+                pool["category_lc"].str.contains("shield", na=False)
+                | pool["itype"].str.contains("shield", na=False)
+                | pool["name"].str.lower().str.contains("shield", na=False)
+            )
+            pool = pool[is_shield]
+
+    # Find base row by name (case-insensitive)
+    cand = pool[pool["name"].str.casefold() == base_name.casefold()]
+    if cand.empty:
+        # fallback: contains
+        cand = pool[pool["name"].str.lower().str.contains(base_name.lower(), na=False)]
+    if cand.empty:
+        return jsonify(ok=False, error=f"Base '{base_name}' not found for type '{t}'"), 404
+
+    base = cand.iloc[0]
+
+    # Seed item dict with base info (keep original category/type so appliers see the right thing)
+    item = {
+        "name": base["name"],
+        "level": int(base["level"] or 0),
+        "rarity": (str(base["rarity"] or "Common")).title(),
+        "price_text": base.get("price_text") or "",
+        "price": base.get("price_text") or "",
+        "category": base.get("category") or ("Shield" if t=="shield" else t.title()),
+        "type": base.get("type") or "",
+        "Bulk": base.get("Bulk"),
+        "Source": base.get("Source"),
+        "tags": base.get("tags"),
+        "_base_name": base["name"],
+    }
+
+    # Apply runes (pipeline)
+    nonce = int(data.get("reroll") or 0)
+    seed = f"{t}|{base['name']}|{L}|{nonce}" if nonce else f"{t}|{base['name']}|{L}"
+    rng = random.Random(seed)
+
+    rune_cfg = _runes_cfg_for_request(t)  # still only boosts fundamental apply_rate for this tool
+    runes_df = _load_runes_df()
+
+    if t == "weapon":
+        item = apply_weapon_runes(item, player_level=L, runes_df=runes_df, rng=rng, rune_cfg=rune_cfg)
+        composed = _compose_weapon_name(item)
+    elif t == "armor":
+        item = apply_armor_runes(item, player_level=L, runes_df=runes_df, rng=rng, rune_cfg=rune_cfg)
+        composed = _compose_armor_name(item)
+    else:
+        item = apply_shield_runes(item, player_level=L, runes_df=runes_df, rng=rng, rune_cfg=rune_cfg)
+        composed = _compose_armor_name(item)
+        
+    # Guarantee labels if applier returned none (baseline PF2 thresholds)
+    def _weapon_labels(L):
+        fund = "+3" if L >= 16 else "+2" if L >= 10 else "+1" if L >= 2 else None
+        props = ["Major Striking"] if L >= 19 else ["Greater Striking"] if L >= 12 else ["Striking"] if L >= 4 else []
+        return fund, props
+
+    def _armor_labels(L):
+        fund = "+3" if L >= 18 else "+2" if L >= 11 else "+1" if L >= 5 else None
+        props = ["Major Resilient"] if L >= 20 else ["Greater Resilient"] if L >= 14 else ["Resilient"] if L >= 8 else []
+        return fund, props
+
+    if not item.get("_rune_fund_label") and not item.get("_rune_prop_labels"):
+        if t == "weapon":
+            f, p = _weapon_labels(L)
+        else:
+            f, p = _armor_labels(L)
+        if f: item["_rune_fund_label"] = f
+        if p: item["_rune_prop_labels"] = p
+
+    # Compose final name; if composer didn't reflect labels, prefix manually as fallback
+    old_name = item.get("name") or base_name
+    if t == "weapon":
+        final_name = composed or old_name
+        if final_name == old_name:
+            if item.get("_rune_fund_label"):
+                final_name = f'{item["_rune_fund_label"]} {final_name}'
+            if item.get("_rune_prop_labels"):
+                # put striking-style first if present
+                striking = [x for x in item["_rune_prop_labels"] if "striking" in x.lower()]
+                others   = [x for x in item["_rune_prop_labels"] if "striking" not in x.lower()]
+                prefix = " ".join(striking + others)
+                if prefix: final_name = f"{prefix} {final_name}"
+    else:
+        final_name = composed or old_name
+        if final_name == old_name:
+            if item.get("_rune_prop_labels"):
+                final_name = f'{item["_rune_prop_labels"][-1]} {final_name}'
+            if item.get("_rune_fund_label"):
+                final_name = f'{item["_rune_fund_label"]} {final_name}'
+
+    item["name"] = final_name
+
+    # Normalize price fields
+    if item.get("price") and not item.get("price_text"):
+        item["price_text"] = item["price"]
+
+    # AoN search target (use base name)
+    item["aon_target"] = item.get("_base_name") or item.get("name")
+
+    return jsonify(ok=True, item=item)
 
 if __name__ == "__main__":
     # For local dev convenience; in production use a WSGI server (gunicorn on Render)

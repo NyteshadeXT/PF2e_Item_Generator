@@ -6,6 +6,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <link rel="stylesheet" href="{{ url_for('static', filename='pf2e.css') }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='spellbook.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='magic_builder.css') }}">
 </head>
 <body>
   <div class="pf-app">
@@ -138,6 +139,94 @@
 	  </div>
 	</section>
 
+	<section id="magic-item-builder" class="pf-card mt-16">
+	  <div class="pf-section__header">
+		<h2 style="margin:0;">Magic Item Builder</h2>
+	  </div>
+	  <div class="p-12">
+		<div class="mib-grid">
+
+		  <!-- Item Type -->
+		  <div class="pf-field mib-col-6">
+			<label class="pf-label">Item Type</label>
+			<select id="mib-type" class="pf-select pf-select-lg">
+			  <option value="weapon">Weapon</option>
+			  <option value="armor">Armor</option>
+			  <option value="shield">Shield</option>
+			</select>
+			<div class="pf-help">Choose what you’re building.</div>
+		  </div>
+
+		  <!-- Maximum Level -->
+		  <div class="pf-field mib-col-6">
+			<label class="pf-label">Maximum Level</label>
+			<input id="mib-max-level" class="pf-input pf-select-lg" type="number" min="1" max="20" value="5">
+			<div class="pf-help">Sets potency caps and property rune bands.</div>
+		  </div>
+
+		  <!-- Weapon-only -->
+		  <div id="mib-weapon-fields" class="mib-col-12" style="display:none;">
+			<div class="mib-grid">
+			  <div class="pf-field mib-col-6">
+				<label class="pf-label">Weapon Type</label>
+				<select id="mib-weapon-type" class="pf-select pf-select-lg">
+				  <option>simple melee</option>
+				  <option>martial melee</option>
+				  <option>advanced melee</option>
+				  <option>simple ranged</option>
+				  <option>martial ranged</option>
+				  <option>advanced ranged</option>
+				</select>
+			  </div>
+			  <div class="pf-field mib-col-6">
+				<label class="pf-label">Weapon</label>
+				<select id="mib-weapon-name" class="pf-select pf-select-lg"></select>
+				<div class="mib-help">Pick from filtered list (or type to search).</div>
+			  </div>
+			</div>
+		  </div>
+
+		  <!-- Armor-only -->
+		  <div id="mib-armor-fields" class="mib-col-12" style="display:none;">
+			<div class="mib-grid">
+			  <div class="pf-field mib-col-6">
+				<label class="pf-label">Armor Type</label>
+				<select id="mib-armor-type" class="pf-select pf-select-lg">
+				  <option>light</option>
+				  <option>medium</option>
+				  <option>heavy</option>
+				</select>
+			  </div>
+			  <div class="pf-field mib-col-6">
+				<label class="pf-label">Armor</label>
+				<select id="mib-armor-name" class="pf-select pf-select-lg"></select>
+			  </div>
+			</div>
+		  </div>
+
+		  <!-- Shield-only -->
+		  <div id="mib-shield-fields" class="mib-col-12" style="display:none;">
+			<div class="pf-field">
+			  <label class="pf-label">Shield</label>
+			  <select id="mib-shield-name" class="pf-select pf-select-lg"></select>
+			</div>
+		  </div>
+
+		  <!-- Actions (single block) -->
+		  <div class="pf-actions mib-col-12">
+			<label class="pf-checkbox" style="margin-right:12px;">
+			  <input type="checkbox" id="mib-reroll"> Re-roll each click
+			</label>
+			<button id="mib-load" class="pf-btn" type="button">Load Base Options</button>
+			<button id="mib-build" class="pf-btn pf-btn-primary" type="button">Build Magic Item</button>
+		  </div>
+
+		  <!-- Output -->
+		  <div class="mib-col-12 mib-output" id="mib-output"></div>
+		</div>
+	  </div>
+	</section>
+
   </div><!-- .pf-app -->
 </body>
 	<script>
@@ -166,5 +255,140 @@
 	  $go?.addEventListener('click', openSpellbookPage);
 	})();
 	</script>
+	
+	{% raw %}
+	<script>
+	(function () {
+	  const $type = document.getElementById('mib-type');
+	  const $lvl  = document.getElementById('mib-max-level');
+
+	  const $wf = document.getElementById('mib-weapon-fields');
+	  const $af = document.getElementById('mib-armor-fields');
+	  const $sf = document.getElementById('mib-shield-fields');
+
+	  const $wType = document.getElementById('mib-weapon-type');
+	  const $wName = document.getElementById('mib-weapon-name');
+	  const $aType = document.getElementById('mib-armor-type');
+	  const $aName = document.getElementById('mib-armor-name');
+	  const $sName = document.getElementById('mib-shield-name');
+
+	  const $load = document.getElementById('mib-load');
+	  const $build = document.getElementById('mib-build');
+	  const $out = document.getElementById('mib-output');
+	  const $re = document.getElementById('mib-reroll');
+
+	  let rollNonce = 0;
+
+	  function togglePanels() {
+		const t = $type.value;
+		$wf.style.display = (t === 'weapon') ? '' : 'none';
+		$af.style.display = (t === 'armor')  ? '' : 'none';
+		$sf.style.display = (t === 'shield') ? '' : 'none';
+	  }
+
+	  function optFill(sel, items) {
+		sel.innerHTML = '';
+		(items || []).forEach(n => {
+		  const o = document.createElement('option');
+		  o.value = n; o.textContent = n;
+		  sel.appendChild(o);
+		});
+		if (sel.options.length) sel.selectedIndex = 0;   // auto-select
+	  }
+
+	  async function loadBases() {
+		const t = $type.value;
+		const max_level = Number($lvl.value || 1);
+		const params = new URLSearchParams({ type: t, max_level: String(max_level) });
+
+		if (t === 'weapon') params.set('subtype', $wType.value);
+		if (t === 'armor')  params.set('armor_type', $aType.value);
+
+		const r = await fetch('/api/magic-builder/bases?' + params.toString());
+		let names = [];
+		try {
+		  const j = await r.json();
+		  names = j.names || [];
+		} catch (_) {}
+
+		if (t === 'weapon') optFill($wName, names);
+		if (t === 'armor')  optFill($aName, names);
+		if (t === 'shield') optFill($sName, names);
+	  }
+
+	  function uiBaseName() {
+		if ($type.value === 'weapon') return $wName.value;
+		if ($type.value === 'armor')  return $aName.value;
+		if ($type.value === 'shield') return $sName.value;
+		return '';
+	  }
+
+	  function renderItem(it) {
+		if (!it || !it.name) { $out.innerHTML = '<p class="pf-meta">No result.</p>'; return; }
+		const runes = (it._rune_fund_label || (it._rune_prop_labels && it._rune_prop_labels.length)) ? `
+		  <div class="mib-props">
+			${it._rune_fund_label ? `<span class="badge">Fundamental: ${it._rune_fund_label}</span>` : ''}
+			${(it._rune_prop_labels || []).map(r => `<span class="badge">${r}</span>`).join(' ')}
+		  </div>` : '';
+		const aon = it.aon_target
+		  ? `https://2e.aonprd.com/Search.aspx?q=${encodeURIComponent(it.aon_target)}`
+		  : null;
+
+		$out.innerHTML = `
+		  <div class="mib-card">
+			<div class="mib-badges">
+			  <span class="badge">${(it.category || 'Item')}</span>
+			  <span class="badge">Level ${it.level ?? 0}</span>
+			  <span class="badge">${(it.rarity || 'Common')}</span>
+			</div>
+			<h3 style="margin:.5rem 0 0;">${it.name}</h3>
+			<div class="pf-meta">${it.price || it.price_text || ''}</div>
+			${runes}
+			${aon ? `<div class="pf-meta" style="margin-top:6px;"><a target="_blank" rel="noopener" href="${aon}">Archives of Nethys</a></div>` : ''}
+		  </div>`;
+	  }
+
+	  // reset nonce whenever inputs change so deterministic mode stays stable
+	  for (const el of [$type, $lvl, $wType, $aType, $wName, $aName, $sName]) {
+		el?.addEventListener('change', () => { rollNonce = 0; });
+	  }
+
+	  async function buildItem() {
+		const body = {
+		  item_type: $type.value,
+		  max_level: Number($lvl.value || 1),
+		  weapon_type: ($type.value === 'weapon') ? $wType.value : undefined,
+		  armor_type:  ($type.value === 'armor')  ? $aType.value : undefined,
+		  base_name: uiBaseName(),
+		  reroll: $re?.checked ? (++rollNonce) : 0
+		};
+		const r = await fetch('/api/magic-builder/build', {
+		  method: 'POST',
+		  headers: {'Content-Type':'application/json'},
+		  body: JSON.stringify(body)
+		});
+		const j = await r.json();
+		if (!j.ok) {
+		  $out.innerHTML = `<p class="pf-meta">Error: ${j.error||'Unknown'}</p>`;
+		  return;
+		}
+		renderItem(j.item);
+	  }
+
+	  // Wire up
+	  $type.addEventListener('change', () => { togglePanels(); loadBases(); });
+	  $lvl.addEventListener('change', loadBases);
+	  $wType.addEventListener('change', loadBases);
+	  $aType.addEventListener('change', loadBases);
+
+	  // initial
+	  togglePanels();
+	  loadBases();
+
+	  $load.addEventListener('click', loadBases);
+	  $build.addEventListener('click', buildItem);
+	})();
+	</script>
+	{% endraw %}
 
 </html>
