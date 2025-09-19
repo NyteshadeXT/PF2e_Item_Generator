@@ -22,8 +22,18 @@
 		  <h1>{{ (shop_type or "Shop") | title }}</h1>
 		</div>
 	  </div>
-	</header>
+        </header>
 
+        {% if channel and roll_id %}
+        <section class="pf-card mt-16" id="share-controls">
+          <div class="p-12" style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;">
+            <span class="pf-kicker" style="margin-right:8px;">Share Link</span>
+            <button type="button" class="pf-btn" id="copy-share-link">Copy player link</button>
+            <span id="copy-share-status" aria-live="polite" class="pf-muted"></span>
+          </div>
+        </section>
+        {% endif %}
+		
     {# ---------- helper macro for a section table ---------- #}
     {% macro section(title, items) -%}
       <section class="pf-card mt-16" id="{{ title|lower|replace(' ', '-') }}">
@@ -452,6 +462,46 @@
 
   </div><!-- .pf-app -->
 
-  </main>
+</main>
+{% if channel and roll_id %}
+<script>
+(function() {
+  const channel = {{ channel|tojson }};
+  const rollId = {{ roll_id|tojson }};
+  if (!channel || !rollId) {
+    return;
+  }
+
+  const params = new URLSearchParams(window.location.search);
+  params.set("channel", channel);
+  params.set("roll_id", rollId);
+  params.delete("snapshot");
+  const newQuery = params.toString();
+  const newUrl = window.location.pathname + (newQuery ? "?" + newQuery : "");
+  if (window.location.href !== window.location.origin + newUrl) {
+    history.replaceState(null, document.title, newUrl);
+  }
+
+  const copyBtn = document.getElementById("copy-share-link");
+  const statusEl = document.getElementById("copy-share-status");
+  if (!copyBtn) {
+    return;
+  }
+  const shareUrl = window.location.origin + newUrl;
+  copyBtn.addEventListener("click", async () => {
+    try {
+      await navigator.clipboard.writeText(shareUrl);
+      if (statusEl) {
+        statusEl.textContent = "Link copied!";
+      }
+    } catch (err) {
+      if (statusEl) {
+        statusEl.textContent = "Copy failed. You can manually share " + shareUrl;
+      }
+    }
+  });
+})();
+</script>
+{% endif %}
 </body>
 </html>

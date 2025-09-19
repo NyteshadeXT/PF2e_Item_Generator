@@ -6,6 +6,7 @@ from flask import (
 )
 
 import io, csv, json, queue, time, uuid, sqlite3, re, random
+from collections import OrderedDict
 
 # Third-party
 import pandas as pd
@@ -212,6 +213,28 @@ def _runes_cfg_for_request(item_type: str) -> dict:
 _subscribers: dict[str, list[queue.Queue]] = {}   # channel -> queues
 _latest_roll_id: dict[str, str] = {}              # channel -> last id
 
+_SNAPSHOT_CACHE_MAX = 100
+_snapshot_cache: OrderedDict[tuple[str, str], dict] = OrderedDict()
+
+
+def _cache_snapshot(channel: str, roll_id: str, snapshot: dict | None) -> None:
+    """Store a snapshot for later retrieval by late joiners."""
+    if not channel or not roll_id or not snapshot:
+        return
+
+    key = (channel, roll_id)
+    _snapshot_cache[key] = deepcopy(snapshot)
+    _snapshot_cache.move_to_end(key)
+
+    while len(_snapshot_cache) > _SNAPSHOT_CACHE_MAX:
+        _snapshot_cache.popitem(last=False)
+
+
+def _get_snapshot(channel: str, roll_id: str) -> dict | None:
+    snap = _snapshot_cache.get((channel, roll_id))
+    if snap is None:
+        return None
+    return deepcopy(snap)
 
 def _subscribe(channel: str) -> queue.Queue:
     q = queue.Queue(maxsize=10)
@@ -297,47 +320,49 @@ def favicon():
     
 @app.route("/player-view", methods=["GET", "POST"])
 def player_view():
-    if request.method == "GET":
-        # Optional: allow snapshot via querystring ?snapshot=<json>
-        raw = request.args.get("snapshot")
-        if not raw:
-            # Lightweight explanation or redirect to /
-            return redirect("/")
-    else:
-        raw = request.form.get("snapshot")
-    channel = (request.form.get("channel") or "default").strip().lower()
-    roll_id = (request.form.get("roll_id") or "").strip()
+    data = request.values
+    raw = data.get("snapshot")
+    channel = (data.get("channel") or "default").strip().lower()
+    roll_id = (data.get("roll_id") or "").strip()
+
+    if request.method == "GET" and not raw and not roll_id:
+        return redirect("/")
 
     lists: dict = {}
     meta: dict = {}
+    snapshot_payload: dict | None = None
 
     # 1) Prefer exact GM snapshot if present
     if raw:
         try:
-            snap = json.loads(raw) or {}
-            if "lists" in snap or "shop" in snap:
-                lists = snap.get("lists") or {}
-                meta = snap.get("shop") or {}
-            else:
-                # tolerate a flat snapshot (legacy format)
-                lists = {
-                    "mundane_items":  snap.get("mundane_items", []),
-                    "material_items": snap.get("material_items", []) or snap.get("materials_items", []),
-                    "armor_items":    snap.get("armor_items", []),
-                    "weapon_items":   snap.get("weapon_items", []),
-                    "magic_items":    snap.get("magic_items", []),
-                    "formula_items":  snap.get("formula_items", []),
-                }
-                meta = {
-                    "shop_type":   snap.get("shop_type"),
-                    "shop_size":   snap.get("shop_size"),
-                    "disposition": snap.get("disposition"),
-                    "party_level": snap.get("party_level"),
-                    "window":      snap.get("window"),
-                }
+            snapshot_payload = json.loads(raw) or {}
         except Exception as e:
             current_app.logger.exception("Invalid snapshot JSON posted to /player-view: %s", e)
             lists, meta = {}, {}
+    elif request.method == "GET" and roll_id:
+        snapshot_payload = _get_snapshot(channel, roll_id)
+
+    if isinstance(snapshot_payload, dict) and snapshot_payload:
+        if "lists" in snapshot_payload or "shop" in snapshot_payload:
+            lists = snapshot_payload.get("lists") or {}
+            meta = snapshot_payload.get("shop") or {}
+        else:
+            # tolerate a flat snapshot (legacy format)
+            lists = {
+                "mundane_items":  snapshot_payload.get("mundane_items", []),
+                "material_items": snapshot_payload.get("material_items", []) or snapshot_payload.get("materials_items", []),
+                "armor_items":    snapshot_payload.get("armor_items", []),
+                "weapon_items":   snapshot_payload.get("weapon_items", []),
+                "magic_items":    snapshot_payload.get("magic_items", []),
+                "formula_items":  snapshot_payload.get("formula_items", []),
+            }
+            meta = {
+                "shop_type":   snapshot_payload.get("shop_type"),
+                "shop_size":   snapshot_payload.get("shop_size"),
+                "disposition": snapshot_payload.get("disposition"),
+                "party_level": snapshot_payload.get("party_level"),
+                "window":      snapshot_payload.get("window"),
+            }
 
     # 2) Fallback: recompute only if snapshot is missing
     if not lists:
@@ -528,6 +553,7 @@ def query():
     channel = (data.get("channel") or "default").strip().lower()
     roll_id = uuid.uuid4().hex[:12]
     _publish(channel, roll_id)
+    _cache_snapshot(channel, roll_id, snapshot)
 
     return render_template(
         "results.html",
