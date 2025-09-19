@@ -24,8 +24,6 @@
 
         <nav class="pf-page-actions" aria-label="Primary actions">
           <a href="/health" class="pf-link-chip">Health</a>
-          <!-- Submit the form from the header via the 'form' attribute -->
-          <button class="pf-link-chip" type="submit" form="generatorForm">Open Results</button>
         </nav>
       </div>
     </header>
@@ -49,11 +47,20 @@
             <div class="pf-help">Choose the kind of shop to bias inventory.</div>
           </div>
 
-		  <!-- Shop Size -->
-		  <div class="pf-field">
-			<label for="shop_size" class="pf-label">Shop Size</label>
-			<select id="shop_size" name="shop_size" class="pf-select pf-select-lg">
-			  {% set current_size = (shop_size or 'Medium') %}
+          <!-- Shop Name -->
+          <div class="pf-field">
+            <label for="shop_name" class="pf-label">Shop Name</label>
+            <input id="shop_name" name="shop_name" type="text"
+                   class="pf-input pf-select-lg" value="{{ shop_name or '' }}"
+                   placeholder="e.g., The Golden Griffin" />
+            <div class="pf-help">Optional: provide a custom name to display for the shop.</div>
+          </div>
+
+                  <!-- Shop Size -->
+                  <div class="pf-field">
+                        <label for="shop_size" class="pf-label">Shop Size</label>
+                        <select id="shop_size" name="shop_size" class="pf-select pf-select-lg">
+                          {% set current_size = (shop_size or 'Medium') %}
 			  {% for opt in ['Small','Medium','Large','Grand'] %}
 				<option value="{{ opt|lower }}" {% if current_size|lower == opt|lower %}selected{% endif %}>{{ opt }}</option>
 			  {% endfor %}
