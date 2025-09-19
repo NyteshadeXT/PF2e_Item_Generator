@@ -2,7 +2,11 @@
 <html>
 <head>
   <meta charset="utf-8" />
-  <title>Inventory Results</title>
+  {% set shop_display_name = shop_name | default('') | trim %}
+  {% if not shop_display_name %}
+    {% set shop_display_name = (shop_type or 'Any') | replace('_',' ') | title %}
+  {% endif %}
+  <title>Item Generator - {{ shop_display_name }}</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <link rel="stylesheet" href="{{ url_for('static', filename='pf2e.css') }}">
 </head>
@@ -14,7 +18,7 @@
       <div class="pf-page-header__inner">
         <div class="pf-page-title">
           <span class="pf-kicker">Pathfinder 2e Remaster</span>
-          <h1>Item Generator</h1>
+          <h1>Item Generator - {{ shop_display_name }}</h1>
           <p class="pf-subtitle">
             <span class="pf-chip">Shop: {{ (shop_type or "Any") | replace('_',' ') | title }}</span>
             <span class="pf-chip">Size: {{ shop_size|title }}</span>
@@ -34,6 +38,7 @@
             "formula_items":  formula_items or []
           },
           "shop": {
+            "shop_name":  shop_name,
             "shop_type":   shop_type,
             "shop_size":   shop_size,
             "disposition": disposition,
@@ -458,11 +463,11 @@
 
       // Dynamic document title reflecting filters
       (function() {
-        const shop = "{{ (shop_type or 'Any') | replace('_',' ') | title }}";
+        const shopName = "{{ shop_display_name }}";
         const size = "{{ shop_size|title }}";
         const disp = "{{ disposition|title }}";
         const pl   = "{{ party_level }}";
-        document.title = `Inventory – ${shop} / ${size} / ${disp} / PL ${pl}`;
+        document.title = `Item Generator – ${shopName} / ${size} / ${disp} / PL ${pl}`;
       })();
     </script>
 

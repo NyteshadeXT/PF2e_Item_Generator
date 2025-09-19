@@ -388,10 +388,16 @@ def player_view():
     if not lists:
         abort(400, "Player View: missing/invalid snapshot.")
 
-    page_title = f"Player View — {(meta.get('shop_type') or 'Shop').title()}"
+    shop_name = _norm_str(meta.get("shop_name") or meta.get("name"))
+    if not shop_name:
+        shop_name = None
+
+    default_label = (_norm_str(meta.get("shop_type")) or "Shop").title()
+    page_title = f"Player View — {shop_name or default_label}"
     return render_template(
         "results_player.html",   # ensure this file exists in templates/
         page_title=page_title,
+        shop_name=shop_name,
         shop_type=meta.get("shop_type"),
         mundane_items=lists.get("mundane_items", []),
         material_items=lists.get("material_items", []),
@@ -428,6 +434,7 @@ def query():
     shop_type   = (data.get("shop_type") or "").strip()
     shop_size   = (data.get("shop_size") or "medium").strip().lower()
     disposition = (data.get("disposition") or "fair").strip().lower()
+    shop_name   = (data.get("shop_name") or "").strip()
     try:
         party_level = int(data.get("party_level") or 5)
     except Exception:
@@ -534,6 +541,7 @@ def query():
 
     snapshot = {
         "shop": {
+            "shop_name": shop_name,
             "shop_type": shop_type,
             "shop_size": shop_size,
             "disposition": disposition,
@@ -560,6 +568,7 @@ def query():
         shop_type=shop_type,
         shop_size=shop_size,
         disposition=disposition,
+        shop_name=shop_name,
         party_level=party_level,
         picked=picked,
         counts=counts,

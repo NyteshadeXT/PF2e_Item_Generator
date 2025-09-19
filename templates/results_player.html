@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>{{ page_title or "Shop Inventory — Player View" }}</title>
+  <title>{{ page_title or ("Player View — " ~ (shop_name or ((shop_type or "Shop") | title))) }}</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <link rel="stylesheet" href="{{ url_for('static', filename='pf2e.css') }}">
   <style>
@@ -19,7 +19,7 @@
 	  <div class="pf-page-header__inner">
 		<div class="pf-page-title">
 		  <span class="pf-kicker">Player View</span>
-		  <h1>{{ (shop_type or "Shop") | title }}</h1>
+            <h1>{{ shop_name or ((shop_type or "Shop") | title) }}</h1>
 		</div>
 	  </div>
         </header>
