@@ -21,10 +21,14 @@ def test_striking_rune_present_in_fundamental_candidates():
     assert any(name.lower() == "striking" for name in names)
 
 
-def test_apply_weapon_runes_can_choose_striking():
+def test_apply_weapon_runes_can_choose_striking_with_potency():
     runes_df = _load_runes_df()
-    striking_df = runes_df[runes_df["name"].str.fullmatch("Striking", case=False)].copy()
-    assert not striking_df.empty, "Expected Striking rune row in dataset"
+    mask = (
+        runes_df["name"].str.fullmatch("Striking", case=False)
+        | runes_df["name"].str.fullmatch(r"Weapon Potency \+1", case=False)
+    )
+    subset = runes_df[mask].copy()
+    assert not subset.empty, "Expected Striking and Potency runes in dataset"
 
     weapon = {"name": "Test Sword", "level": 4, "rarity": "Common", "price_text": "0 gp"}
     rng = random.Random(1337)
@@ -32,7 +36,7 @@ def test_apply_weapon_runes_can_choose_striking():
     fused = apply_weapon_runes(
         weapon,
         player_level=4,
-        runes_df=striking_df,
+        runes_df=subset,
         rng=rng,
         rune_cfg={
             "fundamental": {"apply_rate": 1.0},
@@ -40,4 +44,9 @@ def test_apply_weapon_runes_can_choose_striking():
         },
     )
 
-    assert fused.get("_rune_fund_label", "").lower() == "striking"
+    label = fused.get("_rune_fund_label", "")
+    assert "+1" in label
+    assert "striking" in label.lower()
+    rune_names = {r.get("name") for r in fused.get("runes", [])}
+    assert "Weapon Potency +1" in rune_names
+    assert "Striking" in rune_names
