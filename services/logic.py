@@ -405,6 +405,16 @@ def _boost_quantities(items: list[dict], shop_size: str, item_type: str) -> list
 # ---------- Name composition helpers (NEW) ----------
 
 _MAT_LABEL_RX = re.compile(r"\(([^)]+)\)\s*$")
+_RUNE_PREFIX_RX = re.compile(r"^\s*rune\s*[:\-]", re.IGNORECASE)
+
+def _format_rune_display_name(name: str) -> str:
+    """Prefix standalone rune names with "Rune:" unless already labeled."""
+    base = str(name or "").strip()
+    if not base:
+        return base
+    if _RUNE_PREFIX_RX.match(base):
+        return base
+    return f"Rune: {base}"
 
 def _extract_material_label_from_name(name: str) -> str | None:
     """
@@ -1553,6 +1563,13 @@ def select_items_by_source(
             # keep link targeting the underlying ritual page if you carry a base target
             it["aon_target"] = it.get("aon_target") or base
 
+        # Standalone runes should advertise that they're runes
+        if (cat == "rune") or (st == "runes"):
+            base_name = str(it.get("name") or "").strip()
+            it["name"] = _format_rune_display_name(base_name)
+            if not it.get("aon_target"):
+                it["aon_target"] = base_name
+
     return {
         "items": items_post,
         "base_count": meta["base_count"],
@@ -1838,7 +1855,11 @@ def select_formulas(df: pd.DataFrame, shop_type: str, party_level: int, shop_siz
     for _, row in picks.iterrows():
         lvl = int(row.get("level") or 0)
         rarity = str(row.get("rarity") or "Common").strip().title()
-        base_name = str(row.get("name") or "").strip()
+        base_name_raw = str(row.get("name") or "").strip()
+        st = str(row.get("source_table") or "").strip().lower()
+        cat = str(row.get("category") or "").strip().lower()
+        is_rune = (cat == "rune") or (st == "runes")
+        base_name = _format_rune_display_name(base_name_raw) if is_rune else base_name_raw
         gp = lvl_cost.get(lvl, _formula_cost_table_default().get(lvl, 0))
 
         name = f"Formula - {lvl} ({base_name})"
@@ -1853,7 +1874,7 @@ def select_formulas(df: pd.DataFrame, shop_type: str, party_level: int, shop_siz
             "price": _format_price(_apply_disposition(gp, disposition)),
             "quantity": 1,
             "category": "Formula",
-            "aon_target": base_name,
+            "aon_target": base_name_raw,
             "critical": False,
         })
 

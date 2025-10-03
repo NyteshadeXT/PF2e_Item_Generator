@@ -208,18 +208,19 @@
 			  <tbody>
 				{% for it in formula_items %}
 				  <tr>
+						<td>
+						  <a href="{{ aon_url(it.aon_target or it.name) }}" target="_blank" rel="noopener">{{ it.name }}</a>
+						  {% if it.critical %}<span class="badge critical" style="margin-left:6px;">Critical</span>{% endif %}
+						  {% if it.is_3pp %}
+								<span class="badge thirdparty">3PP</span>
+						  {% endif %}
+						</td>
+						<td>{{ it.level }}</td>
 					<td>
-					  <a href="{{ aon_url(it.aon_target or it.name) }}" target="_blank" rel="noopener">{{ it.name }}</a>
-					  {% if it.critical %}<span class="badge critical" style="margin-left:6px;">Critical</span>{% endif %}
-					  {% if it.is_3pp %}
-						<span class="badge thirdparty">3PP</span>
-					  {% endif %}
+						  {% set r = (it.rarity or 'Common')|lower %}
+						  <span class="badge rarity-chip {{ r }}">{{ it.rarity or 'Common' }}</span>
 					</td>
-				    <td>
-					  {% set r = (it.rarity or 'Common')|lower %}
-					  <span class="badge rarity-chip {{ r }}">{{ it.rarity or 'Common' }}</span>
-				    </td>
-					<td>{{ it.price }}</td>
+						<td>{{ it.price }}</td>
 					<td>{{ it.quantity }}</td>
 					<td>{{ it.category }}</td>
 					<td>{{ it.Source or "—" }}</td>
