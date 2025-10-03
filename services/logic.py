@@ -616,6 +616,54 @@ def _apply_adjustments_to_items(
 # ---------- NEW: Scroll enrichment ----------
 
 _SCROLL_RE = re.compile(r"^Spell scroll \((\d+)(?:st|nd|rd|th) level\)$", re.IGNORECASE)
+_WAND_LEVEL_RX = re.compile(r"(\d+)(?:st|nd|rd|th)[-\s]*(?:level|rank) spell", re.IGNORECASE)
+
+_SPELLS_DF_CACHE: pd.DataFrame | None = None
+_SPELLS_BY_RANK_CACHE: dict[int, pd.DataFrame] | None = None
+
+
+def _ensure_spells_cache() -> tuple[pd.DataFrame, dict[int, pd.DataFrame]]:
+    global _SPELLS_DF_CACHE, _SPELLS_BY_RANK_CACHE
+
+    if _SPELLS_DF_CACHE is not None and _SPELLS_BY_RANK_CACHE is not None:
+        return _SPELLS_DF_CACHE, _SPELLS_BY_RANK_CACHE
+
+    spells_df = pd.DataFrame()
+    try:
+        con = sqlite3.connect(CONFIG["sqlite_db_path"])
+        spells_df = pd.read_sql_query('SELECT Name, Rank, Rarity FROM Spells;', con)
+    except Exception as e:
+        print(">>> WARN: could not load Spells table:", e)
+    finally:
+        try:
+            con.close()
+        except Exception:
+            pass
+
+    if spells_df is None or spells_df.empty:
+        _SPELLS_DF_CACHE = pd.DataFrame()
+        _SPELLS_BY_RANK_CACHE = {}
+        return _SPELLS_DF_CACHE, _SPELLS_BY_RANK_CACHE
+
+    if "Name" in spells_df.columns:
+        spells_df["Name"] = spells_df["Name"].astype(str).str.strip()
+    if "Rank" in spells_df.columns:
+        spells_df["Rank"] = pd.to_numeric(spells_df["Rank"], errors="coerce").fillna(0).astype(int)
+    else:
+        spells_df["Rank"] = 0
+    if "Rarity" in spells_df.columns:
+        spells_df["Rarity"] = spells_df["Rarity"].astype(str).str.strip().str.title()
+    else:
+        spells_df["Rarity"] = "Common"
+
+    by_rank: dict[int, pd.DataFrame] = {}
+    if "Rank" in spells_df.columns:
+        for rank, grp in spells_df.groupby("Rank"):
+            by_rank[int(rank)] = grp.copy()
+
+    _SPELLS_DF_CACHE = spells_df
+    _SPELLS_BY_RANK_CACHE = by_rank
+    return _SPELLS_DF_CACHE, _SPELLS_BY_RANK_CACHE
 
 def _parse_scroll_level(name: str) -> int | None:
     m = _SCROLL_RE.match((name or "").strip())
@@ -637,25 +685,10 @@ def _enrich_spell_scrolls(items: list[dict]) -> list[dict]:
     if not items:
         return items
 
-    # Load Spells once from SQLite
-    spells_df = pd.DataFrame()
-    try:
-        con = sqlite3.connect(CONFIG["sqlite_db_path"])
-        spells_df = pd.read_sql_query('SELECT Name, Rank, Rarity FROM Spells;', con)
-    except Exception as e:
-        print(">>> WARN: could not load Spells table:", e)
-    finally:
-        try:
-            con.close()
-        except Exception:
-            pass
-
-    if spells_df.empty:
+    spells_df, spells_by_rank = _ensure_spells_cache()
+    if spells_df is None or spells_df.empty:
         return items
 
-    # Normalize spell rarity
-    if "Rarity" in spells_df.columns:
-        spells_df["Rarity"] = spells_df["Rarity"].astype(str).str.strip().str.title()
     mults = _rarity_multiplier_map()
 
     rng = random.Random()
@@ -666,8 +699,8 @@ def _enrich_spell_scrolls(items: list[dict]) -> list[dict]:
         if lvl is None:
             out.append(it); continue
 
-        pool = spells_df[spells_df["Rank"].astype(int) == int(lvl)]
-        if pool.empty:
+        pool = spells_by_rank.get(int(lvl)) if spells_by_rank else None
+        if pool is None or pool.empty:
             out.append(it); continue
 
         pick = pool.sample(n=1, replace=True, random_state=rng.randint(0, 10**9)).iloc[0]
@@ -692,6 +725,86 @@ def _enrich_spell_scrolls(items: list[dict]) -> list[dict]:
 
     return out
 
+def _parse_wand_rank(name: str, level: int | None = None) -> int | None:
+    m = _WAND_LEVEL_RX.search((name or "").strip())
+    if m:
+        try:
+            return int(m.group(1))
+        except Exception:
+            return None
+
+    if level is None:
+        return None
+
+    try:
+        lvl = int(level)
+    except Exception:
+        return None
+
+    if lvl <= 0:
+        return None
+
+    return max(1, min(10, (lvl + 1) // 2))
+
+
+def _enrich_magic_wands(items: list[dict]) -> list[dict]:
+    """Append spell details to magic and specialty wands using spell-rank criteria."""
+    if not items:
+        return items
+
+    spells_df, spells_by_rank = _ensure_spells_cache()
+    if spells_df is None or spells_df.empty:
+        return items
+
+    mults = _rarity_multiplier_map()
+    rng = random.Random()
+    out: list[dict] = []
+
+    for it in items:
+        item_type = str(it.get("type", "")).strip().lower()
+        name = str(it.get("name", "")).strip()
+
+        if item_type != "wands" or not name:
+            out.append(it)
+            continue
+
+        lvl = None
+        try:
+            lvl = int(it.get("level") or 0)
+        except Exception:
+            lvl = None
+
+        rank = _parse_wand_rank(name, lvl)
+        if not rank:
+            out.append(it)
+            continue
+
+        pool = spells_by_rank.get(int(rank)) if spells_by_rank else None
+        if pool is None or pool.empty:
+            out.append(it)
+            continue
+
+        pick = pool.sample(n=1, replace=True, random_state=rng.randint(0, 10**9)).iloc[0]
+        spell_name = str(pick.get("Name", "")).strip()
+        if not spell_name:
+            out.append(it)
+            continue
+        spell_rar = str(pick.get("Rarity", "Common")).strip().title() or "Common"
+
+        base_gp = to_gp(it.get("price", ""))
+        if base_gp is None:
+            base_gp = to_gp(it.get("price_text", ""))
+        new_gp = (base_gp or 0.0) * float(mults.get(spell_rar, 1.0))
+
+        fused = dict(it)
+        fused["name"] = f"{name} - {spell_name}"
+        fused["price"] = _format_price(new_gp)
+        fused["spell"] = {"name": spell_name, "rarity": spell_rar, "rank": int(rank)}
+        fused["aon_target"] = spell_name
+        out.append(fused)
+
+    return out
+    
 def _is_shield(item: dict) -> bool:
     sub = (item.get("subtype") or item.get("Subtype") or "").strip().lower()
     cat = (item.get("category") or "").strip().lower()
@@ -809,7 +922,7 @@ def _potency_cap_for_weapon_level(pl: int) -> int:
     return 3                 # 16+
 
 def _is_fundamental(row: dict) -> bool:
-    t = (row.get("Type") or "").strip().lower()
+    t = (row.get("Type") or row.get("type") or "").strip().lower()
     n = (row.get("name") or "").strip().lower()
     # tolerate pluralization and schema variance
     # e.g., "Weapon Fundamental Runes", "Weapon Fundamentals", etc.
@@ -839,19 +952,31 @@ def _is_property(row: dict) -> bool:
 
     return False
 
+def _is_weapon_fundamental_property(row: dict) -> bool:
+    t = (row.get("Type") or row.get("type") or "").strip().lower()
+    n = (row.get("name") or "").strip().lower()
+    return ("weapon" in t and "fundamental" in t and "property" in t) or (
+        "fundamental" in n and "property" in n and "weapon" in n
+    )
+
 def _fundamental_candidates(all_runes, weapon_level, party_level):
     cap = _potency_cap_for_weapon_level(party_level)
     if cap <= 0:
         return []
-    lvl_hi = int(party_level)
+    lvl_hi = int(party_level) + 1
     out = []
     for r in all_runes:
         if not _is_fundamental(r):
             continue
         pr = parse_potency_rank(r.get("name"))
-        if pr < 1 or pr > cap:
+        level = int(r.get("level") or 0)
+        if pr >= 1:
+            if pr > cap:
+                continue
+            if level <= lvl_hi:
+                out.append(r)
             continue
-        if int(r.get("level") or 0) <= lvl_hi:
+        if _is_weapon_fundamental_property(r) and level <= lvl_hi:
             out.append(r)
     return out
 
@@ -1059,7 +1184,8 @@ def _select_items_core(
     # ---------- Enrich spell scrolls ----------
     if item_type.lower() == "magic":
         items_pre = _enrich_spell_scrolls(items_pre)
-
+        items_pre = _enrich_magic_wands(items_pre)
+        
     # --- adjustments for armor & weapons ---
     if item_type.lower() in ("armor", "weapons"):
         from services.db import load_adjustments
