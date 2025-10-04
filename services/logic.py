@@ -4,7 +4,16 @@ from typing import Dict, List, Tuple
 import json, random, re, sqlite3
 import pandas as pd
 from pathlib import Path
-from services.utils import to_gp, normalize_str_columns, apply_adjustments_probabilistic, apply_materials_probabilistic, bump_rarity, add_price, parse_potency_rank, within_range
+from services.utils import (
+    to_gp,
+    normalize_str_columns,
+    apply_adjustments_probabilistic,
+    apply_materials_probabilistic,
+    bump_rarity,
+    add_price,
+    parse_potency_rank,
+    within_range,
+)
 from services.db import load_items
 
 
@@ -13,6 +22,25 @@ print(">>> USING services.logic from", __file__)
 CONFIG = json.loads(Path(__file__).resolve().parent.parent.joinpath("config.json").read_text(encoding="utf-8"))
 GROUPS = CONFIG.get("source_table_groups", {})
 
+_ST_ALIAS_MAP = {
+    "held_items": "held_item",
+    "held_item": "held_item",
+    "ccstructure": "cc_structure",
+    "c_c_structure": "cc_structure",
+    "cc_structure": "cc_structure",
+    "specific_magic_shield": "specific_magic_shield",
+    "specific_magic_shields": "specific_magic_shield",
+}
+
+
+def _normalize_source_table_token(value: str) -> str:
+    """Normalize a source_table identifier to config-style tokens."""
+    token = str(value or "").strip().lower()
+    token = re.sub(r"[\s\-]+", "_", token)
+    token = re.sub(r"[^a-z0-9_]+", "", token)
+    token = re.sub(r"_+", "_", token).strip("_")
+    return _ST_ALIAS_MAP.get(token, token)
+    
 def _format_price(gp_value: float | None) -> str:
     """Format a gp float into PF2e denominations (gp/sp/cp)."""
     if gp_value is None:
@@ -120,12 +148,8 @@ def _filter_source_tables(df: pd.DataFrame, source_tables) -> pd.DataFrame:
     if isinstance(source_tables, str):
         source_tables = [source_tables]
 
-    def _norm(s: str) -> str:
-        s = str(s or "").lower().strip()
-        return "".join(ch for ch in s if ch.isalnum())
-
-    wanted = {_norm(s) for s in source_tables if str(s).strip()}
-    col_norm = df["source_table"].astype(str).map(_norm)
+    wanted = {_normalize_source_table_token(s) for s in source_tables if str(s).strip()}
+    col_norm = df["source_table"].astype(str).map(_normalize_source_table_token)
 
     # 1) exact normalized match
     mask = col_norm.isin(wanted)
@@ -959,6 +983,54 @@ def _is_weapon_fundamental_property(row: dict) -> bool:
         "fundamental" in n and "property" in n and "weapon" in n
     )
 
+def _required_potency_for_fundamental_property(name: str) -> int:
+    n = (name or "").strip().lower()
+    if not n:
+        return 1
+    if "major" in n:
+        return 3
+    if "greater" in n:
+        return 2
+    return 1
+
+def _format_fundamental_pair_label(potency_rune: dict | None, property_rune: dict) -> str:
+    prop_label = str(property_rune.get("name") or "").strip()
+    if not potency_rune:
+        return prop_label
+    rank = parse_potency_rank(potency_rune.get("name"))
+    if rank:
+        potency_label = f"+{rank}"
+    else:
+        potency_label = str(potency_rune.get("name") or "").strip()
+    return " ".join(part for part in (potency_label, prop_label) if part)
+
+def _pick_potency_for_property(
+    all_runes: list[dict],
+    *,
+    required_rank: int,
+    player_level: int,
+    rng: random.Random,
+    cfg: dict | None,
+) -> dict | None:
+    cap = _potency_cap_for_weapon_level(player_level)
+    if required_rank > cap:
+        return None
+    lvl_hi = int(player_level) + 1
+    potency_cands: list[dict] = []
+    for r in all_runes:
+        if not _is_fundamental(r) or _is_weapon_fundamental_property(r):
+            continue
+        rank = parse_potency_rank(r.get("name"))
+        if rank < required_rank or rank > cap:
+            continue
+        level = int(r.get("level") or 0)
+        if level > lvl_hi:
+            continue
+        potency_cands.append(r)
+    if not potency_cands:
+        return None
+    return _weighted_pick_fundamental(potency_cands, rng, cfg)
+    
 def _fundamental_candidates(all_runes, weapon_level, party_level):
     cap = _potency_cap_for_weapon_level(party_level)
     if cap <= 0:
@@ -977,7 +1049,17 @@ def _fundamental_candidates(all_runes, weapon_level, party_level):
                 out.append(r)
             continue
         if _is_weapon_fundamental_property(r) and level <= lvl_hi:
-            out.append(r)
+            required = _required_potency_for_fundamental_property(r.get("name"))
+            if required <= cap:
+                has_potency = any(
+                    _is_fundamental(p)
+                    and not _is_weapon_fundamental_property(p)
+                    and required <= parse_potency_rank(p.get("name")) <= cap
+                    and int(p.get("level") or 0) <= lvl_hi
+                    for p in all_runes
+                )
+                if has_potency:
+                    out.append(r)
     return out
 
 def _weighted_pick_fundamental(cands: list[dict], rng: random.Random, cfg: dict | None) -> dict | None:
@@ -1097,19 +1179,10 @@ def _select_items_core(
     if base_n > 0 and not norm_pool.empty:
         if item_type.lower() == "magic" and isinstance(source_tables, (list, tuple, set)):
             # --- Uniform-per-source sampling so each source_table has equal chance ---
-            import re as _re
             npool = norm_pool.copy()
 
-            # Normalize source_table tokens on BOTH sides to ensure matches like "held item" vs "held_items"
-            def _st_norm(s: str) -> str:
-                t = _re.sub(r"[\s\-]+", "_", str(s or "").strip().lower())
-                # small alias map for common variants
-                if t == "held_items": t = "held_item"
-                if t == "held item":  t = "held_item"
-                return t
-
-            want = [_st_norm(s) for s in list(source_tables)]
-            npool["_st_norm"] = npool["source_table"].astype(str).map(_st_norm)
+            want = [_normalize_source_table_token(s) for s in list(source_tables)]
+            npool["_st_norm"] = npool["source_table"].astype(str).map(_normalize_source_table_token)
 
             # groups only for requested sources (ignore extras)
             groups = {st: npool[npool["_st_norm"] == st] for st in set(want)}
@@ -1343,19 +1416,48 @@ def apply_weapon_runes(
     # --- FUNDAMENTAL (probabilistic gate) ---
     chosen_fund = None
     if rng.random() < fund_rate:
-        fund_cands  = _fundamental_candidates(all_runes, weapon_level, player_level)
-        chosen_fund = _weighted_pick_fundamental(fund_cands, rng, rcfg)
-        if chosen_fund:
+        fund_cands = _fundamental_candidates(all_runes, weapon_level, player_level)
+        fund_label = ""
+        potency = 0
+        while fund_cands:
+            pick = _weighted_pick_fundamental(fund_cands, rng, rcfg)
+            if not pick:
+                break
+            fund_cands = [r for r in fund_cands if r is not pick]
+
+            paired_potency = None
+            if _is_weapon_fundamental_property(pick):
+                required = _required_potency_for_fundamental_property(pick.get("name"))
+                paired_potency = _pick_potency_for_property(
+                    all_runes,
+                    required_rank=required,
+                    player_level=player_level,
+                    rng=rng,
+                    cfg=rcfg,
+                )
+                if not paired_potency:
+                    continue
+
+            chosen_fund = pick
             chosen.append(chosen_fund)
             new_gp += (to_gp(chosen_fund.get("price_text")) or 0.0)
             new_rarity = bump_rarity(new_rarity, (chosen_fund.get("rarity") or "Common"))
 
-            # Label for final name composer
-            fused["_rune_fund_label"] = str(chosen_fund.get("name", "")).strip()
+            potency = parse_potency_rank(chosen_fund.get("name"))
+            fund_label = str(chosen_fund.get("name", "")).strip()
 
-            potency = parse_potency_rank(chosen_fund.get("name"))  # 1..3
+            if paired_potency:
+                chosen.append(paired_potency)
+                new_gp += (to_gp(paired_potency.get("price_text")) or 0.0)
+                new_rarity = bump_rarity(new_rarity, (paired_potency.get("rarity") or "Common"))
+                potency = max(potency, parse_potency_rank(paired_potency.get("name")))
+                fund_label = _format_fundamental_pair_label(paired_potency, chosen_fund)
 
-            # --- PROPERTIES (probabilistic gates per rules) ---
+            fused["_rune_fund_label"] = fund_label
+            break
+
+        # --- PROPERTIES (probabilistic gates per rules) ---
+        if fund_label:
             prop_labels: list[str] = []
             if potency > 0 and rng.random() < prop_rate:
                 prop_cands = _property_candidates(all_runes, player_level)
@@ -1919,14 +2021,9 @@ def select_formulas(df: pd.DataFrame, shop_type: str, party_level: int, shop_siz
     )
 
     # --- IMPORTANT: normalize source_table names before filtering ---
-    import re
-    def _st_norm(s: str) -> str:
-        # collapse to snake-ish: "Specific Magic Weapons" -> "specific_magic_weapons"
-        return re.sub(r'[^a-z0-9]+', '_', str(s or '').lower()).strip('_')
-
-    eligible_norm = { _st_norm(x) for x in eligible_sources }
+    eligible_norm = { _normalize_source_table_token(x) for x in eligible_sources }
     if "source_table" in d.columns:
-        d["__st"] = d["source_table"].apply(_st_norm)
+        d["__st"] = d["source_table"].apply(_normalize_source_table_token)
         d = d[d["__st"].isin(eligible_norm)]
     else:
         d = d.iloc[0:0]  # no source table info -> nothing eligible
