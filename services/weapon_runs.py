@@ -148,6 +148,40 @@ def test_weapon_fundamental_property_gate_can_fail():
     assert "striking" not in str(fused.get("_rune_fund_label", "")).lower()
     
 
+def test_weapon_fundamental_property_obeys_apply_rate():
+    runes_df = _load_runes_df()
+    mask = (
+        runes_df["name"].str.fullmatch("Striking", case=False)
+        | runes_df["name"].str.fullmatch(r"Weapon Potency \+1", case=False)
+    )
+    subset = runes_df[mask].copy()
+    assert not subset.empty, "Expected Striking and Potency runes in dataset"
+
+    weapon = {"name": "Test Sword", "level": 4, "rarity": "Common", "price_text": "0 gp"}
+    rng = SequenceRandom([0.0, 0.1, 0.0], seed=314)
+
+    fused = apply_weapon_runes(
+        weapon,
+        player_level=4,
+        runes_df=subset,
+        rng=rng,
+        rune_cfg={
+            "fundamental": {
+                "apply_rate": 1.0,
+                "potency_weights": {"0": 10, "1": 1},
+                "property_pair_rate": 1.0,
+            },
+            "fundamental property": {"apply_rate": 0.0},
+            "property": {"apply_rate": 0.0, "per_slot_rate": 0.0},
+        },
+    )
+
+    rune_names = {r.get("name") for r in fused.get("runes", [])}
+    assert "Weapon Potency +1" in rune_names
+    assert "Striking" not in rune_names
+    assert "striking" not in str(fused.get("_rune_fund_label", "")).lower()
+
+
 def test_weapon_potency_always_applies_with_candidates():
     runes_df = _load_runes_df()
     mask = runes_df["name"].str.fullmatch(r"Weapon Potency \+1", case=False)
@@ -255,6 +289,36 @@ def test_armor_fundamental_property_gate_can_fail():
     assert "resilient" not in str(fused.get("_rune_fund_label", "")).lower()
 
 
+def test_armor_fundamental_property_obeys_apply_rate():
+    runes_df = _load_runes_df()
+    mask = (
+        runes_df["name"].str.fullmatch("Resilient", case=False)
+        | runes_df["name"].str.fullmatch(r"Armor Potency \+1", case=False)
+    )
+    subset = runes_df[mask].copy()
+    assert not subset.empty, "Expected Resilient and Armor Potency runes in dataset"
+
+    armor = {"name": "Reliable Armor", "level": 8, "rarity": "Common", "price_text": "0 gp"}
+    rng = SequenceRandom([0.0, 0.1, 0.0], seed=815)
+
+    fused = apply_armor_runes(
+        armor,
+        player_level=10,
+        runes_df=subset,
+        rng=rng,
+        rune_cfg={
+            "fundamental": {"apply_rate": 1.0, "property_pair_rate": 1.0},
+            "fundamental property": {"apply_rate": 0.0},
+            "property": {"apply_rate": 0.0, "per_slot_rate": 0.0},
+        },
+    )
+
+    rune_names = {r.get("name") for r in fused.get("runes", [])}
+    assert "Armor Potency +1" in rune_names
+    assert "Resilient" not in rune_names
+    assert "resilient" not in str(fused.get("_rune_fund_label", "")).lower()
+    
+
 def test_weapon_property_requires_fundamental_rune():
     runes_df = _mock_weapon_runes_df()
     weapon = {"name": "Simple Blade", "level": 8, "rarity": "Common", "price_text": "0 gp"}
@@ -288,7 +352,8 @@ def test_weapon_property_per_slot_rate_is_about_thirty_percent():
 
     cfg = {
         "fundamental": {"apply_rate": 1.0, "property_pair_rate": 0.0},
-        "property": {"apply_rate": 1.0},
+        "fundamental": {"apply_rate": 1.0},
+        "fundamental property": {"apply_rate": 0.0},
     }
 
     iterations = 2000
@@ -315,7 +380,8 @@ def test_weapon_property_rarity_weighting_favors_common():
 
     cfg = {
         "fundamental": {"apply_rate": 1.0, "property_pair_rate": 0.0},
-        "property": {"apply_rate": 1.0, "per_slot_rate": 1.0},
+        "fundamental": {"apply_rate": 1.0},
+        "fundamental property": {"apply_rate": 0.0},
     }
 
     counts = {"Common": 0, "Uncommon": 0, "Rare": 0}

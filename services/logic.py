@@ -1227,6 +1227,36 @@ def _pick_best_fundamental_property(
         pool = candidates
     return pool[rng.randint(0, len(pool) - 1)]
 
+def _resolve_fundamental_property_rate(
+    rune_cfg: dict | None,
+    *,
+    default: float = 0.6,
+) -> float:
+    """Read the fundamental-property apply rate with backward-compatible fallbacks."""
+
+    def _as_float(value) -> float | None:
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return None
+
+    if isinstance(rune_cfg, dict):
+        # Preferred: dedicated "fundamental property" block.
+        fp_cfg = rune_cfg.get("fundamental property") or rune_cfg.get("fundamental_property")
+        if isinstance(fp_cfg, dict):
+            rate = _as_float(fp_cfg.get("apply_rate"))
+            if rate is not None:
+                return rate
+
+        # Legacy fallback: the property_pair_rate lived under the fundamental block.
+        fund_cfg = rune_cfg.get("fundamental")
+        if isinstance(fund_cfg, dict):
+            rate = _as_float(fund_cfg.get("property_pair_rate"))
+            if rate is not None:
+                return rate
+
+    return float(default)
+    
 def _resolve_rarity_weights(primary: dict | None, fallback: dict | None = None) -> dict[str, float]:
     """Merge rarity-weight mappings and normalize to usable floats."""
     merged: dict[str, float] = {}
@@ -1678,7 +1708,7 @@ def apply_weapon_runes(
     rcfg = (rune_cfg or {}) if rune_cfg is not None else (CONFIG.get("runes", {}) or {})
     fund_cfg = (rcfg.get("fundamental") or {}) if isinstance(rcfg, dict) else {}
     fund_rate = float(fund_cfg.get("apply_rate", 1.0))   # default: try fund always
-    pair_rate = float(fund_cfg.get("property_pair_rate", 0.6))
+    pair_rate = _resolve_fundamental_property_rate(rcfg)
     prop_cfg = (rcfg.get("property") or {}) if isinstance(rcfg, dict) else {}
     prop_rate = float(prop_cfg.get("apply_rate", 0.30))
     per_slot  = float(prop_cfg.get("per_slot_rate", 0.30))
@@ -1843,7 +1873,7 @@ def apply_armor_runes(
     rcfg = (rune_cfg or {}) if rune_cfg is not None else (CONFIG.get("runes", {}) or {})
     fund_cfg = (rcfg.get("fundamental") or {}) if isinstance(rcfg, dict) else {}
     fund_rate = float(fund_cfg.get("apply_rate", 1.0))
-    pair_rate = float(fund_cfg.get("property_pair_rate", 0.6))
+    pair_rate = _resolve_fundamental_property_rate(rcfg)
     prop_cfg = (rcfg.get("property") or {}) if isinstance(rcfg, dict) else {}
     prop_rate = float(prop_cfg.get("apply_rate", 0.30))
     per_slot  = float(prop_cfg.get("per_slot_rate", 0.30))
