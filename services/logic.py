@@ -854,11 +854,153 @@ def _is_shield_property(row: dict) -> bool:
             return True
     return False
 
-def _shield_property_candidates(all_runes: list[dict], party_level: int) -> list[dict]:
+_DAMAGE_TYPE_TOKENS = {
+    "acid", "bludgeoning", "cold", "electricity", "fire", "force",
+    "negative", "piercing", "poison", "positive", "slashing", "sonic",
+}
+
+_USAGE_TOKENS = {"melee", "ranged", "thrown", "unarmed"}
+_ARMOR_CATEGORY_TOKENS = {"light", "medium", "heavy"}
+_MATERIAL_TOKENS = {
+    "adamantine", "bone", "cold iron", "coldiron", "darkwood", "leather",
+    "metal", "mithral", "nonmetal", "nonmetallic", "nonmetalic",
+    "steel", "wood", "wooden",
+}
+
+
+def _normalize_phrase(value: str | None) -> str:
+    s = re.sub(r"[^a-z0-9]+", " ", str(value or "").lower())
+    return re.sub(r"\s+", " ", s).strip()
+
+
+def _normalize_compact(value: str | None) -> str:
+    return re.sub(r"\s+", "", _normalize_phrase(value))
+
+
+def _tokenize_field(value) -> set[str]:
+    tokens: set[str] = set()
+    if value is None:
+        return tokens
+    if isinstance(value, (list, tuple, set)):
+        iterable = value
+    else:
+        iterable = [value]
+    for raw in iterable:
+        if raw is None:
+            continue
+        text = str(raw)
+        parts = [text]
+        parts.extend(re.split(r"[;,/]+", text))
+        for part in parts:
+            norm = _normalize_phrase(part)
+            if not norm:
+                continue
+            tokens.add(norm)
+            tokens.add(_normalize_compact(part))
+            tokens.update(p for p in norm.split(" ") if p)
+    return {t for t in tokens if t}
+
+
+def _collect_item_context(item: dict) -> dict[str, set[str]]:
+    keys = (
+        "type", "Type", "subtype", "Subtype", "tags", "Tags", "traits", "Traits",
+        "damage_type", "DamageType", "damage_types", "DamageTypes",
+        "name", "Name", "category", "Category",
+    )
+    tokens: set[str] = set()
+    for key in keys:
+        tokens.update(_tokenize_field(item.get(key)))
+    usage = {t for t in tokens if t in _USAGE_TOKENS}
+    damage = {t for t in tokens if t in _DAMAGE_TYPE_TOKENS}
+    armor = {t for t in tokens if t in _ARMOR_CATEGORY_TOKENS}
+    materials = {t for t in tokens if t in _MATERIAL_TOKENS}
+    if any("coldiron" == t for t in tokens):
+        materials.add("cold iron")
+    return {
+        "all": tokens,
+        "usage": usage,
+        "damage": damage,
+        "armor_category": armor,
+        "materials": materials,
+    }
+
+
+def _categorize_prereq_token(token: str) -> str:
+    if token in _ARMOR_CATEGORY_TOKENS:
+        return "armor_category"
+    if token in _USAGE_TOKENS:
+        return "usage"
+    if token in _DAMAGE_TYPE_TOKENS:
+        return "damage_type"
+    if token in _MATERIAL_TOKENS:
+        return "material"
+    if token == "shield":
+        return "shield"
+    return f"literal:{token}"
+
+
+def _extract_prereq_requirements(row: dict) -> dict[str, set[str]]:
+    text = row.get("Prerequisite") or row.get("prerequisite") or ""
+    if not text or not str(text).strip():
+        return {}
+    reqs: dict[str, set[str]] = {}
+    cleaned = str(text).replace("/", ";")
+    for chunk in re.split(r"[;,]", cleaned):
+        chunk = chunk.strip()
+        if not chunk:
+            continue
+        parts = re.split(r"\bor\b", chunk, flags=re.IGNORECASE)
+        for part in parts:
+            norm = _normalize_phrase(part)
+            if not norm:
+                continue
+            category = _categorize_prereq_token(norm)
+            reqs.setdefault(category, set()).add(norm)
+    return reqs
+
+
+def _prerequisites_match(row: dict, item_context: dict[str, set[str]]) -> bool:
+    reqs = _extract_prereq_requirements(row)
+    if not reqs:
+        return True
+    tokens_all = item_context.get("all", set())
+    for category, required in reqs.items():
+        if category == "armor_category":
+            if not (required & item_context.get("armor_category", set())):
+                return False
+        elif category == "damage_type":
+            damage_tokens = item_context.get("damage", set())
+            if not damage_tokens or not required.issubset(damage_tokens):
+                return False
+        elif category == "usage":
+            if not (required & item_context.get("usage", set())):
+                return False
+        elif category == "material":
+            if not (required & item_context.get("materials", set())):
+                return False
+        elif category == "shield":
+            if "shield" not in tokens_all:
+                return False
+        elif category.startswith("literal:"):
+            token = next(iter(required), category.split(":", 1)[-1])
+            if token not in tokens_all:
+                return False
+        else:
+            if not (required & tokens_all):
+                return False
+    return True
+
+
+def _shield_property_candidates(
+    all_runes: list[dict], party_level: int, shield_row: dict
+) -> list[dict]:
     hi = int(party_level) + 1
+    context = _collect_item_context(shield_row)
     out = []
     for r in all_runes:
         if not _is_shield_property(r):
+            continue
+        if not _prerequisites_match(r, context):
             continue
         rl = int(r.get("level") or 0)
         if rl <= hi:
@@ -927,11 +1069,16 @@ def _fundamental_candidates_armor(all_runes, armor_level, party_level):
             out.append(r)
     return out
 
-def _property_candidates_armor(all_runes: list[dict], party_level: int) -> list[dict]:
+def _property_candidates_armor(
+    all_runes: list[dict], party_level: int, armor_row: dict
+) -> list[dict]:
     lo, hi = party_level - 3, party_level + 1
+    context = _collect_item_context(armor_row)
     out = []
     for r in all_runes:
         if not _is_armor_property(r):
+            continue
+        if not _prerequisites_match(r, context):
             continue
         rl = int(r.get("level") or 0)
         if lo <= rl <= hi:
@@ -1085,11 +1232,16 @@ def _weighted_pick_fundamental(cands: list[dict], rng: random.Random, cfg: dict 
     return cands[-1]
 
 
-def _property_candidates(all_runes: list[dict], party_level: int) -> list[dict]:
+def _property_candidates(
+    all_runes: list[dict], party_level: int, weapon_row: dict
+) -> list[dict]:
     lo, hi = party_level - 3, party_level + 1
+    context = _collect_item_context(weapon_row)
     out = []
     for r in all_runes:
         if not _is_property(r):
+            continue
+        if not _prerequisites_match(r, context):
             continue
         rl = int(r.get("level") or 0)
         if lo <= rl <= hi:
@@ -1460,8 +1612,8 @@ def apply_weapon_runes(
         if fund_label:
             prop_labels: list[str] = []
             if potency > 0 and rng.random() < prop_rate:
-                prop_cands = _property_candidates(all_runes, player_level)
-
+                prop_cands = _property_candidates(all_runes, player_level, fused)
+                 
                 picked_names = set()
                 slots_taken = 0
                 for _ in range(potency):
@@ -1588,7 +1740,7 @@ def apply_armor_runes(
             # PROPERTIES
             prop_labels: list[str] = []
             if potency > 0 and rng.random() < prop_rate:
-                prop_cands = _property_candidates_armor(all_runes, player_level)
+                prop_cands = _property_candidates_armor(all_runes, player_level, fused)
                 picked_names = set()
                 slots_taken = 0
                 for _ in range(potency):
@@ -1692,7 +1844,7 @@ def apply_shield_runes(
     # Single property rune gate
     chosen: list[dict] = []
     if rng.random() < prop_rate:
-        pool = _shield_property_candidates(all_runes, player_level)
+        pool = _shield_property_candidates(all_runes, player_level, fused)
         if pool:
             r = pool[rng.randint(0, len(pool) - 1)]
             chosen.append(r)
