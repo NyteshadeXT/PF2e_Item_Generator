@@ -117,13 +117,13 @@
 
   "weapon_runes": {
     "fundamental": { "apply_rate": 1.0, "potency_weights": { "1": 1, "2": 2, "3": 3 } },
-    "property":    { "apply_rate": 0.50, "per_slot_rate": 0.50 }
+    "property":    { "apply_rate": 0.30, "per_slot_rate": 0.30 }
   },
 
   "armor_runes": {
     "fundamental": { "apply_rate": 1.0, "potency_weights": { "1": 1, "2": 2, "3": 3 } },
-    "property":    { "apply_rate": 0.50, "per_slot_rate": 0.50 }
+    "property":    { "apply_rate": 0.30, "per_slot_rate": 0.30 }
   },
 
-  "shield_runes": { "property": { "apply_rate": 0.35 } }
+  "shield_runes": { "property": { "apply_rate": 0.30 } }
 }

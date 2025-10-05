@@ -1226,7 +1226,56 @@ def _pick_best_fundamental_property(
     else:
         pool = candidates
     return pool[rng.randint(0, len(pool) - 1)]
-    
+
+def _resolve_rarity_weights(primary: dict | None, fallback: dict | None = None) -> dict[str, float]:
+    """Merge rarity-weight mappings and normalize to usable floats."""
+    merged: dict[str, float] = {}
+    for source in (fallback, primary):
+        if not isinstance(source, dict):
+            continue
+        for key, value in source.items():
+            try:
+                weight = float(value)
+            except (TypeError, ValueError):
+                continue
+            merged[str(key).strip().title()] = max(weight, 0.0)
+
+    if not merged:
+        merged = {"Common": 1.0}
+    if merged.get("Common", 0.0) <= 0:
+        merged["Common"] = 1.0
+    return merged
+
+
+def _weighted_pick_by_rarity(
+    pool: list[dict], rng: random.Random, rarity_weights: dict[str, float]
+) -> dict | None:
+    if not pool:
+        return None
+
+    weights: list[float] = []
+    default_weight = float(rarity_weights.get("Common", 1.0))
+    for entry in pool:
+        rarity = str(entry.get("rarity") or "Common").strip().title()
+        weight = rarity_weights.get(rarity, default_weight)
+        try:
+            weight = float(weight)
+        except (TypeError, ValueError):
+            weight = default_weight
+        weights.append(max(weight, 0.0))
+
+    if not any(w > 0 for w in weights):
+        return pool[rng.randint(0, len(pool) - 1)]
+
+    total = sum(weights)
+    pick_point = rng.random() * total
+    acc = 0.0
+    for entry, weight in zip(pool, weights):
+        acc += weight
+        if pick_point <= acc:
+            return entry
+    return pool[-1]
+
 def _format_fundamental_pair_label(potency_rune: dict | None, property_rune: dict) -> str:
     prop_label = str(property_rune.get("name") or "").strip()
     if not potency_rune:
@@ -1631,8 +1680,13 @@ def apply_weapon_runes(
     fund_rate = float(fund_cfg.get("apply_rate", 1.0))   # default: try fund always
     pair_rate = float(fund_cfg.get("property_pair_rate", 0.6))
     prop_cfg = (rcfg.get("property") or {}) if isinstance(rcfg, dict) else {}
-    prop_rate = float(prop_cfg.get("apply_rate", 0.6))
-    per_slot  = float(prop_cfg.get("per_slot_rate", 0.7))
+    prop_rate = float(prop_cfg.get("apply_rate", 0.30))
+    per_slot  = float(prop_cfg.get("per_slot_rate", 0.30))
+    rarity_weights = _resolve_rarity_weights(
+        primary=(rcfg.get("rarity_weights") if isinstance(rcfg, dict) else None),
+        fallback=CONFIG.get("rarity_weights", {"Common": 1.0}),
+    )
+
 
     # Base state from current weapon row
     weapon_level = int(fused.get("level") or 0)
@@ -1678,36 +1732,38 @@ def apply_weapon_runes(
                         potency_rune, prop_rune
                     )
 
-                prop_rune = _pick_best_fundamental_property(prop_cands, potency, rng)
-                if prop_rune:
-                    chosen.append(prop_rune)
-                    new_gp += (to_gp(prop_rune.get("price_text")) or 0.0)
-                    new_rarity = bump_rarity(new_rarity, (prop_rune.get("rarity") or "Common"))
-                    fused["_rune_fund_label"] = _format_fundamental_pair_label(
-                        potency_rune, prop_rune
-                    )
+    # --- PROPERTIES (probabilistic gates per rules) ---
+    prop_labels: List[str] = []
+    if potency_rune:
+        if potency > 0 and rng.random() < prop_rate:
+            prop_cands = _property_candidates(all_runes, player_level, fused)
 
-            picked_names = set()
-            slots_taken = 0
-            for _ in range(potency):
-                if rng.random() >= per_slot:
-                    continue
-                pool = [r for r in prop_cands if r.get("name") not in picked_names]
-                if not pool:
-                    break
-                r = pool[rng.randint(0, len(pool) - 1)]
-                picked_names.add(r.get("name"))
-                chosen.append(r)
-                new_gp += (to_gp(r.get("price_text")) or 0.0)
-                new_rarity = bump_rarity(new_rarity, (r.get("rarity") or "Common"))
-                prop_labels.append(str(r.get("name", "")).strip())
-                slots_taken += 1
-                if slots_taken >= potency:
-                    break
+            prop_labels: list[str] = []
+            if potency > 0 and rng.random() < prop_rate:
+                prop_cands = _property_candidates(all_runes, player_level, fused)
+                picked_names = set()
+                slots_taken = 0
+                for _ in range(potency):
+                    if rng.random() >= per_slot:
+                        continue
+                    pool = [r for r in prop_cands if r.get("name") not in picked_names]
+                    if not pool:
+                        break
+                    r = _weighted_pick_by_rarity(pool, rng, rarity_weights)
+                    if r is None:
+                        break
+                    picked_names.add(r.get("name"))
+                    chosen.append(r)
+                    new_gp += (to_gp(r.get("price_text")) or 0.0)
+                    new_rarity = bump_rarity(new_rarity, (r.get("rarity") or "Common"))
+                    prop_labels.append(str(r.get("name", "")).strip())
+                    slots_taken += 1
+                    if slots_taken >= potency:
+                        break
 
-        # Store property labels ONCE, after the loop finishes
-        if prop_labels:
-            fused["_rune_prop_labels"] = prop_labels
+            # Store property labels ONCE, after the loop finishes
+            if prop_labels:
+                fused["_rune_prop_labels"] = prop_labels
 
     # LEVEL = max(base, any chosen rune levels)
     try:
@@ -1789,8 +1845,12 @@ def apply_armor_runes(
     fund_rate = float(fund_cfg.get("apply_rate", 1.0))
     pair_rate = float(fund_cfg.get("property_pair_rate", 0.6))
     prop_cfg = (rcfg.get("property") or {}) if isinstance(rcfg, dict) else {}
-    prop_rate = float(prop_cfg.get("apply_rate", 0.6))
-    per_slot  = float(prop_cfg.get("per_slot_rate", 0.7))
+    prop_rate = float(prop_cfg.get("apply_rate", 0.30))
+    per_slot  = float(prop_cfg.get("per_slot_rate", 0.30))
+    rarity_weights = _resolve_rarity_weights(
+        primary=(rcfg.get("rarity_weights") if isinstance(rcfg, dict) else None),
+        fallback=CONFIG.get("rarity_weights", {"Common": 1.0}),
+    )
 
     armor_level = int(fused.get("level") or 0)
     base_rarity = (fused.get("rarity") or "Common").strip().title()
@@ -1830,9 +1890,9 @@ def apply_armor_runes(
                         potency_rune, prop_rune
                     )
 
+    prop_labels: List[str] = []
     if potency_rune:
         # PROPERTIES
-        prop_labels: list[str] = []
         if potency > 0 and rng.random() < prop_rate:
             prop_cands = _property_candidates_armor(all_runes, player_level, fused)
             picked_names = set()
@@ -1843,7 +1903,9 @@ def apply_armor_runes(
                 pool = [r for r in prop_cands if r.get("name") not in picked_names]
                 if not pool:
                     break
-                r = pool[rng.randint(0, len(pool) - 1)]
+                r = _weighted_pick_by_rarity(pool, rng, rarity_weights)
+                if r is None:
+                    break
                 picked_names.add(r.get("name"))
                 chosen.append(r)
                 new_gp     += (to_gp(r.get("price_text")) or 0.0)
@@ -1852,8 +1914,8 @@ def apply_armor_runes(
                 slots_taken += 1
                 if slots_taken >= potency:
                     break
-        if prop_labels:
-            fused["_rune_prop_labels"] = prop_labels
+    if prop_labels:
+        fused["_rune_prop_labels"] = prop_labels
 
     # LEVEL bump
     try:
@@ -1927,7 +1989,13 @@ def apply_shield_runes(
 
     # Config: prefer shield_runes > armor_runes > runes
     rcfg = rune_cfg or CONFIG.get("shield_runes") or CONFIG.get("armor_runes") or CONFIG.get("runes") or {}
-    prop_rate = float((rcfg.get("property") or {}).get("apply_rate", 0.50))
+    if not isinstance(rcfg, dict):
+        rcfg = {}
+    prop_rate = float((rcfg.get("property") or {}).get("apply_rate", 0.30))
+    rarity_weights = _resolve_rarity_weights(
+        primary=rcfg.get("rarity_weights"),
+        fallback=CONFIG.get("rarity_weights", {"Common": 1.0}),
+    )
 
     # Base state
     base_rarity = (fused.get("rarity") or "Common").strip().title()
@@ -1940,7 +2008,9 @@ def apply_shield_runes(
     if rng.random() < prop_rate:
         pool = _shield_property_candidates(all_runes, player_level, fused)
         if pool:
-            r = pool[rng.randint(0, len(pool) - 1)]
+            r = _weighted_pick_by_rarity(pool, rng, rarity_weights)
+            if r is None:
+                r = pool[rng.randint(0, len(pool) - 1)]
             chosen.append(r)
             new_gp     += (to_gp(r.get("price_text")) or 0.0)
             new_rarity  = bump_rarity(new_rarity, (r.get("rarity") or "Common"))
