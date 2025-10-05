@@ -116,12 +116,12 @@
   "materials": { "apply_rate": 0.05 },
 
   "weapon_runes": {
-    "fundamental": { "apply_rate": 0.35, "potency_weights": { "1": 5, "2": 2, "3": 1 } },
+    "fundamental": { "apply_rate": 1.0, "potency_weights": { "1": 5, "2": 2, "3": 1 } },
     "property":    { "apply_rate": 0.50, "per_slot_rate": 0.50 }
   },
 
   "armor_runes": {
-    "fundamental": { "apply_rate": 0.35, "potency_weights": { "1": 4, "2": 2, "3": 1 } },
+    "fundamental": { "apply_rate": 1.0, "potency_weights": { "1": 4, "2": 2, "3": 1 } },
     "property":    { "apply_rate": 0.50, "per_slot_rate": 0.50 }
   },
 
