@@ -1217,7 +1217,20 @@ def _weighted_pick_fundamental(cands: list[dict], rng: random.Random, cfg: dict 
     if not cands:
         return None
     fcfg = (cfg or {}).get("fundamental", {}) if cfg else {}
-    pot_w = fcfg.get("potency_weights", {"1": 1, "2": 3, "3": 6})  # ← prefer higher potency
+    raw_weights = fcfg.get("potency_weights") if isinstance(fcfg, dict) else None
+
+    if raw_weights:
+        pot_w = {str(k): float(v) for k, v in raw_weights.items()}
+    else:
+        ranks = {
+            parse_potency_rank(r.get("name"))
+            for r in cands
+            if parse_potency_rank(r.get("name")) > 0
+        }
+        if ranks:
+            pot_w = {str(rank): float(rank) for rank in sorted(ranks)}
+        else:
+            pot_w = {}
 
     weights = []
     for r in cands:
