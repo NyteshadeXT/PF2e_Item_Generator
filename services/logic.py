@@ -1054,10 +1054,12 @@ def _potency_cap_for_armor_level(pl: int) -> int:
     return 3                  # 18+
 
 def _fundamental_candidates_armor(all_runes, armor_level, party_level):
+    if int(party_level) < 5:
+        return []
     cap = _potency_cap_for_armor_level(party_level)
     if cap <= 0:
         return []
-    lvl_hi = int(party_level)
+    lvl_hi = int(party_level) + 1
     out = []
     for r in all_runes:
         if not _is_armor_fundamental(r):
@@ -1179,6 +1181,8 @@ def _pick_potency_for_property(
     return _weighted_pick_fundamental(potency_cands, rng, cfg)
     
 def _fundamental_candidates(all_runes, weapon_level, party_level):
+    if int(party_level) < 2:
+        return []
     cap = _potency_cap_for_weapon_level(party_level)
     if cap <= 0:
         return []
