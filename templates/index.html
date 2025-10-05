@@ -236,19 +236,153 @@
 
   </div><!-- .pf-app -->
 </body>
-	<script>
-	(function () {
-	  const $trad   = document.getElementById('sb-tradition');
-	  const $level  = document.getElementById('sb-max-level');
-	  const $themes = document.getElementById('sb-themes');
-	  const $go     = document.getElementById('sb-generate');
+        <script>
+        (function () {
+          const STORAGE_KEY = 'pf2e-item-generator-state-v1';
 
-	  function openSpellbookPage() {
-		const themes = ($themes.value || '')
-		  .split(/[,\s]+/)
-		  .map(s => s.trim())
-		  .filter(Boolean)
-		  .join(',');
+          function load() {
+                try {
+                  const raw = window.localStorage.getItem(STORAGE_KEY);
+                  if (!raw) return {};
+                  const parsed = JSON.parse(raw);
+                  return (parsed && typeof parsed === 'object') ? parsed : {};
+                } catch (_) {
+                  return {};
+                }
+          }
+
+          const state = load();
+
+          function persist() {
+                try {
+                  window.localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+                } catch (_) {}
+          }
+
+          function ensureSection(section) {
+                if (!section) return state;
+                const current = state[section];
+                if (current && typeof current === 'object') return current;
+                state[section] = {};
+                return state[section];
+          }
+
+          function save(section, data) {
+                if (!section || !data || typeof data !== 'object') return;
+                const target = ensureSection(section);
+                Object.assign(target, data);
+                persist();
+          }
+
+          function clear(section, keys) {
+                if (!section) {
+                  for (const key of Object.keys(state)) delete state[key];
+                  try { window.localStorage.removeItem(STORAGE_KEY); } catch (_) {}
+                  return;
+                }
+
+                const target = state[section];
+                if (!target || typeof target !== 'object') return;
+
+                if (typeof keys === 'undefined') {
+                  delete state[section];
+                  persist();
+                  return;
+                }
+
+                const list = Array.isArray(keys) ? keys : [keys];
+                for (const key of list) delete target[key];
+                persist();
+          }
+
+          window.__pfState = {
+                storageKey: STORAGE_KEY,
+                get(section) {
+                  if (!section) return Object.assign({}, state);
+                  const src = ensureSection(section);
+                  return Object.assign({}, src);
+                },
+                save,
+                clear
+          };
+        })();
+        </script>
+
+        <script>
+        (function () {
+          const store = window.__pfState;
+          const section = 'generator';
+          const form = document.getElementById('generatorForm');
+          if (!store || !form) return;
+
+          const saved = store.get(section) || {};
+          const fields = {
+                shop_type: 'change',
+                shop_name: 'input',
+                shop_size: 'change',
+                disposition: 'change',
+                party_level: 'input'
+          };
+
+          Object.entries(fields).forEach(([id, evt]) => {
+                const el = document.getElementById(id);
+                if (!el) return;
+
+                if (Object.prototype.hasOwnProperty.call(saved, id)) {
+                  const value = saved[id];
+                  if (value !== undefined && value !== null) {
+                        el.value = value;
+                  }
+                }
+
+                const handler = () => {
+                  const value = el.value;
+                  store.save(section, { [id]: value });
+                };
+
+                el.addEventListener(evt, handler);
+          });
+
+          form.addEventListener('reset', () => {
+                store.clear(section);
+          });
+        })();
+        </script>
+        <script>
+        (function () {
+          const store = window.__pfState;
+          const $trad   = document.getElementById('sb-tradition');
+          const $level  = document.getElementById('sb-max-level');
+          const $themes = document.getElementById('sb-themes');
+          const $go     = document.getElementById('sb-generate');
+
+          const saved = store?.get?.('spellbook') || {};
+
+          if (saved.tradition && $trad) {
+                const opt = Array.from($trad.options || []).find(o => o.value === saved.tradition);
+                if (opt) $trad.value = saved.tradition;
+          }
+          if (Object.prototype.hasOwnProperty.call(saved, 'max_level') && $level) {
+                $level.value = saved.max_level;
+          }
+          if (Object.prototype.hasOwnProperty.call(saved, 'themes') && $themes) {
+                $themes.value = saved.themes;
+          }
+
+          function remember() {
+                store?.save?.('spellbook', {
+                  tradition: $trad?.value,
+                  max_level: $level?.value,
+                  themes: $themes?.value
+                });
+          }
+
+          function openSpellbookPage() {
+                const themes = ($themes.value || '')
+                  .split(/[,\s]+/)
+                  .map(s => s.trim())
+                  .filter(Boolean)
+                  .join(',');
 
 		const params = new URLSearchParams({
 		  tradition: $trad.value,
@@ -256,16 +390,22 @@
 		  themes
 		});
 
-		window.open(`/spellbooks/view?${params.toString()}`, '_blank', 'noopener');
+			window.open(`/spellbooks/view?${params.toString()}`, '_blank', 'noopener');
 	  }
 
-	  $go?.addEventListener('click', openSpellbookPage);
-	})();
-	</script>
+		  $trad?.addEventListener('change', remember);
+		  $level?.addEventListener('input', remember);
+		  $themes?.addEventListener('input', remember);
+
+		  remember();
+		  $go?.addEventListener('click', openSpellbookPage);
+		})();
+		</script>
 	
 	{% raw %}
 	<script>
 	(function () {
+	  const store = window.__pfState;
 	  const $type = document.getElementById('mib-type');
 	  const $lvl  = document.getElementById('mib-max-level');
 
@@ -286,6 +426,43 @@
 
 	  let rollNonce = 0;
 
+	  const saved = store?.get?.('magicBuilder') || {};
+
+	  if (saved.item_type && $type) {
+			const opt = Array.from($type.options || []).find(o => o.value === saved.item_type);
+			if (opt) $type.value = saved.item_type;
+	  }
+	  if (Object.prototype.hasOwnProperty.call(saved, 'max_level') && $lvl) {
+			$lvl.value = saved.max_level;
+	  }
+	  if (saved.weapon_type && $wType) {
+			const opt = Array.from($wType.options || []).find(o => o.value === saved.weapon_type);
+			if (opt) $wType.value = saved.weapon_type;
+	  }
+	  if (saved.armor_type && $aType) {
+			const opt = Array.from($aType.options || []).find(o => o.value === saved.armor_type);
+			if (opt) $aType.value = saved.armor_type;
+	  }
+	  if (saved.weapon_name) $wName.dataset.pendingValue = saved.weapon_name;
+	  if (saved.armor_name) $aName.dataset.pendingValue = saved.armor_name;
+	  if (saved.shield_name) $sName.dataset.pendingValue = saved.shield_name;
+	  if (typeof saved.reroll === 'boolean' && $re) {
+			$re.checked = saved.reroll;
+	  }
+
+	  function remember() {
+			store?.save?.('magicBuilder', {
+			  item_type: $type?.value,
+			  max_level: $lvl?.value,
+			  weapon_type: $wType?.value,
+			  armor_type: $aType?.value,
+			  weapon_name: $wName?.value,
+			  armor_name: $aName?.value,
+			  shield_name: $sName?.value,
+			  reroll: Boolean($re?.checked)
+			});
+	  }
+
 	  function togglePanels() {
 		const t = $type.value;
 		$wf.style.display = (t === 'weapon') ? '' : 'none';
@@ -293,34 +470,47 @@
 		$sf.style.display = (t === 'shield') ? '' : 'none';
 	  }
 
-	  function optFill(sel, items) {
-		sel.innerHTML = '';
-		(items || []).forEach(n => {
-		  const o = document.createElement('option');
-		  o.value = n; o.textContent = n;
-		  sel.appendChild(o);
-		});
-		if (sel.options.length) sel.selectedIndex = 0;   // auto-select
+	  function optFill(sel, items, desired) {
+			if (!sel) return;
+			const target = desired ?? sel.dataset?.pendingValue ?? '';
+			sel.innerHTML = '';
+			(items || []).forEach(n => {
+			  const o = document.createElement('option');
+			  o.value = n; o.textContent = n;
+			  sel.appendChild(o);
+			});
+			if (target) {
+			  const match = Array.from(sel.options || []).find(o => o.value === target);
+			  if (match) sel.value = target;
+			}
+			if (sel.options.length && sel.selectedIndex === -1) sel.selectedIndex = 0;   // auto-select
+			if (sel.dataset) sel.dataset.pendingValue = '';
 	  }
 
 	  async function loadBases() {
-		const t = $type.value;
-		const max_level = Number($lvl.value || 1);
-		const params = new URLSearchParams({ type: t, max_level: String(max_level) });
+			const t = $type.value;
+			const max_level = Number($lvl.value || 1);
+			const params = new URLSearchParams({ type: t, max_level: String(max_level) });
 
-		if (t === 'weapon') params.set('subtype', $wType.value);
-		if (t === 'armor')  params.set('armor_type', $aType.value);
+			if (t === 'weapon') params.set('subtype', $wType.value);
+			if (t === 'armor')  params.set('armor_type', $aType.value);
 
-		const r = await fetch('/api/magic-builder/bases?' + params.toString());
-		let names = [];
-		try {
-		  const j = await r.json();
-		  names = j.names || [];
-		} catch (_) {}
+			const desiredWeapon = $wName?.dataset?.pendingValue || $wName?.value || '';
+			const desiredArmor = $aName?.dataset?.pendingValue || $aName?.value || '';
+			const desiredShield = $sName?.dataset?.pendingValue || $sName?.value || '';
 
-		if (t === 'weapon') optFill($wName, names);
-		if (t === 'armor')  optFill($aName, names);
-		if (t === 'shield') optFill($sName, names);
+			const r = await fetch('/api/magic-builder/bases?' + params.toString());
+			let names = [];
+			try {
+			  const j = await r.json();
+			  names = j.names || [];
+			} catch (_) {}
+
+			if (t === 'weapon') optFill($wName, names, desiredWeapon);
+			if (t === 'armor')  optFill($aName, names, desiredArmor);
+			if (t === 'shield') optFill($sName, names, desiredShield);
+
+			remember();
 	  }
 
 	  function uiBaseName() {
@@ -361,40 +551,45 @@
 	  }
 
 	  async function buildItem() {
-		const body = {
-		  item_type: $type.value,
-		  max_level: Number($lvl.value || 1),
-		  weapon_type: ($type.value === 'weapon') ? $wType.value : undefined,
-		  armor_type:  ($type.value === 'armor')  ? $aType.value : undefined,
-		  base_name: uiBaseName(),
-		  reroll: $re?.checked ? (++rollNonce) : 0
-		};
-		const r = await fetch('/api/magic-builder/build', {
-		  method: 'POST',
-		  headers: {'Content-Type':'application/json'},
-		  body: JSON.stringify(body)
-		});
-		const j = await r.json();
-		if (!j.ok) {
-		  $out.innerHTML = `<p class="pf-meta">Error: ${j.error||'Unknown'}</p>`;
-		  return;
-		}
-		renderItem(j.item);
+			const body = {
+			  item_type: $type.value,
+			  max_level: Number($lvl.value || 1),
+			  weapon_type: ($type.value === 'weapon') ? $wType.value : undefined,
+			  armor_type:  ($type.value === 'armor')  ? $aType.value : undefined,
+			  base_name: uiBaseName(),
+			  reroll: $re?.checked ? (++rollNonce) : 0
+			};
+			const r = await fetch('/api/magic-builder/build', {
+			  method: 'POST',
+			  headers: {'Content-Type':'application/json'},
+			  body: JSON.stringify(body)
+			});
+			const j = await r.json();
+			if (!j.ok) {
+			  $out.innerHTML = `<p class="pf-meta">Error: ${j.error||'Unknown'}</p>`;
+			  return;
+			}
+			renderItem(j.item);
+			remember();
 	  }
 
 	  // Wire up
-	  $type.addEventListener('change', () => { togglePanels(); loadBases(); });
-	  $lvl.addEventListener('change', loadBases);
-	  $wType.addEventListener('change', loadBases);
-	  $aType.addEventListener('change', loadBases);
+	  $type.addEventListener('change', () => { togglePanels(); loadBases(); remember(); });
+	  $lvl.addEventListener('change', () => { loadBases(); remember(); });
+	  $wType.addEventListener('change', () => { loadBases(); remember(); });
+	  $aType.addEventListener('change', () => { loadBases(); remember(); });
+	  $wName.addEventListener('change', remember);
+	  $aName.addEventListener('change', remember);
+	  $sName.addEventListener('change', remember);
+	  $re?.addEventListener('change', remember);
 
 	  // initial
 	  togglePanels();
 	  loadBases();
+	  remember();
 
 	  $load.addEventListener('click', loadBases);
 	  $build.addEventListener('click', buildItem);
-	})();
 	</script>
 	{% endraw %}
 
