@@ -2,6 +2,8 @@
 from dataclasses import dataclass
 from typing import Dict, List, Tuple
 import json, random, re, sqlite3
+from typing import Callable
+
 import pandas as pd
 from pathlib import Path
 from services.utils import (
@@ -1022,6 +1024,15 @@ def _is_armor_fundamental(row: dict) -> bool:
         return True
     return False
 
+def _is_armor_fundamental_property(row: dict) -> bool:
+    if not _is_armor_fundamental(row):
+        return False
+    n = (row.get("name") or "").strip().lower()
+    if "resilient" in n:
+        return True
+    t = (row.get("Type") or row.get("type") or "").strip().lower()
+    return "fundamental" in t and "property" in t and "armor" in t
+
 def _is_armor_property(row: dict) -> bool:
     t   = (row.get("Type") or row.get("type") or "").strip().lower()
     st  = (row.get("Subtype") or row.get("subtype") or "").strip().lower()
@@ -1071,6 +1082,17 @@ def _fundamental_candidates_armor(all_runes, armor_level, party_level):
             out.append(r)
     return out
 
+def _armor_fundamental_property_candidates(
+    all_runes: list[dict], *, potency_rank: int, party_level: int
+) -> list[dict]:
+    return _collect_fundamental_property_candidates(
+        all_runes,
+        potency_rank=potency_rank,
+        party_level=party_level,
+        cap_func=_potency_cap_for_armor_level,
+        predicate=_is_armor_fundamental_property,
+    )
+    
 def _property_candidates_armor(
     all_runes: list[dict], party_level: int, armor_row: dict
 ) -> list[dict]:
@@ -1142,6 +1164,69 @@ def _required_potency_for_fundamental_property(name: str) -> int:
         return 2
     return 1
 
+def _collect_fundamental_property_candidates(
+    all_runes: list[dict],
+    *,
+    potency_rank: int,
+    party_level: int,
+    cap_func: Callable[[int], int],
+    predicate: Callable[[dict], bool],
+) -> list[dict]:
+    potency_rank = int(potency_rank or 0)
+    if potency_rank <= 0:
+        return []
+    cap = int(cap_func(party_level))
+    if cap <= 0:
+        return []
+    lvl_hi = int(party_level) + 1
+    ranked: list[tuple[int, int, dict]] = []
+    for r in all_runes:
+        if not predicate(r):
+            continue
+        required = _required_potency_for_fundamental_property(r.get("name"))
+        if required > potency_rank or required > cap:
+            continue
+        level = int(r.get("level") or 0)
+        if level > lvl_hi:
+            continue
+        ranked.append((required, level, r))
+    ranked.sort(key=lambda tup: (tup[0], tup[1]), reverse=True)
+    return [r for _, _, r in ranked]
+
+def _weapon_fundamental_property_candidates(
+    all_runes: list[dict], *, potency_rank: int, party_level: int
+) -> list[dict]:
+    return _collect_fundamental_property_candidates(
+        all_runes,
+        potency_rank=potency_rank,
+        party_level=party_level,
+        cap_func=_potency_cap_for_weapon_level,
+        predicate=_is_weapon_fundamental_property,
+    )
+
+def _pick_best_fundamental_property(
+    candidates: list[dict], potency_rank: int, rng: random.Random
+) -> dict | None:
+    if not candidates:
+        return None
+    best_required = max(
+        _required_potency_for_fundamental_property(r.get("name"))
+        for r in candidates
+        if _required_potency_for_fundamental_property(r.get("name")) <= potency_rank
+    ) if any(
+        _required_potency_for_fundamental_property(r.get("name")) <= potency_rank
+        for r in candidates
+    ) else None
+    if best_required is not None:
+        pool = [
+            r
+            for r in candidates
+            if _required_potency_for_fundamental_property(r.get("name")) == best_required
+        ]
+    else:
+        pool = candidates
+    return pool[rng.randint(0, len(pool) - 1)]
+    
 def _format_fundamental_pair_label(potency_rune: dict | None, property_rune: dict) -> str:
     prop_label = str(property_rune.get("name") or "").strip()
     if not potency_rune:
@@ -1152,33 +1237,6 @@ def _format_fundamental_pair_label(potency_rune: dict | None, property_rune: dic
     else:
         potency_label = str(potency_rune.get("name") or "").strip()
     return " ".join(part for part in (potency_label, prop_label) if part)
-
-def _pick_potency_for_property(
-    all_runes: list[dict],
-    *,
-    required_rank: int,
-    player_level: int,
-    rng: random.Random,
-    cfg: dict | None,
-) -> dict | None:
-    cap = _potency_cap_for_weapon_level(player_level)
-    if required_rank > cap:
-        return None
-    lvl_hi = int(player_level) + 1
-    potency_cands: list[dict] = []
-    for r in all_runes:
-        if not _is_fundamental(r) or _is_weapon_fundamental_property(r):
-            continue
-        rank = parse_potency_rank(r.get("name"))
-        if rank < required_rank or rank > cap:
-            continue
-        level = int(r.get("level") or 0)
-        if level > lvl_hi:
-            continue
-        potency_cands.append(r)
-    if not potency_cands:
-        return None
-    return _weighted_pick_fundamental(potency_cands, rng, cfg)
     
 def _fundamental_candidates(all_runes, weapon_level, party_level):
     if int(party_level) < 2:
@@ -1569,9 +1627,12 @@ def apply_weapon_runes(
 
     # Config
     rcfg = (rune_cfg or {}) if rune_cfg is not None else (CONFIG.get("runes", {}) or {})
-    fund_rate = float((rcfg.get("fundamental") or {}).get("apply_rate", 1.0))   # default: try fund always
-    prop_rate = float((rcfg.get("property")    or {}).get("apply_rate", 0.6))
-    per_slot  = float((rcfg.get("property")    or {}).get("per_slot_rate", 0.7))
+    fund_cfg = (rcfg.get("fundamental") or {}) if isinstance(rcfg, dict) else {}
+    fund_rate = float(fund_cfg.get("apply_rate", 1.0))   # default: try fund always
+    pair_rate = float(fund_cfg.get("property_pair_rate", 0.6))
+    prop_cfg = (rcfg.get("property") or {}) if isinstance(rcfg, dict) else {}
+    prop_rate = float(prop_cfg.get("apply_rate", 0.6))
+    per_slot  = float(prop_cfg.get("per_slot_rate", 0.7))
 
     # Base state from current weapon row
     weapon_level = int(fused.get("level") or 0)
@@ -1582,76 +1643,71 @@ def apply_weapon_runes(
     new_rarity = base_rarity
     chosen: list[dict] = []
 
-    # --- FUNDAMENTAL (probabilistic gate) ---
-    chosen_fund = None
+    # --- FUNDAMENTAL (potency first, then optional property pairing) ---
+    potency = 0
+    potency_rune = None
     if rng.random() < fund_rate:
         fund_cands = _fundamental_candidates(all_runes, weapon_level, player_level)
-        fund_label = ""
-        potency = 0
-        while fund_cands:
-            pick = _weighted_pick_fundamental(fund_cands, rng, rcfg)
-            if not pick:
-                break
-            fund_cands = [r for r in fund_cands if r is not pick]
+        potency_cands = [
+            r
+            for r in fund_cands
+            if parse_potency_rank(r.get("name")) >= 1 and not _is_weapon_fundamental_property(r)
+        ]
+        potency_rune = _weighted_pick_fundamental(potency_cands, rng, rcfg)
+        if potency_rune:
+            chosen.append(potency_rune)
+            new_gp += (to_gp(potency_rune.get("price_text")) or 0.0)
+            new_rarity = bump_rarity(new_rarity, (potency_rune.get("rarity") or "Common"))
 
-            paired_potency = None
-            if _is_weapon_fundamental_property(pick):
-                required = _required_potency_for_fundamental_property(pick.get("name"))
-                paired_potency = _pick_potency_for_property(
-                    all_runes,
-                    required_rank=required,
-                    player_level=player_level,
-                    rng=rng,
-                    cfg=rcfg,
-                )
-                if not paired_potency:
-                    continue
-
-            chosen_fund = pick
-            chosen.append(chosen_fund)
-            new_gp += (to_gp(chosen_fund.get("price_text")) or 0.0)
-            new_rarity = bump_rarity(new_rarity, (chosen_fund.get("rarity") or "Common"))
-
-            potency = parse_potency_rank(chosen_fund.get("name"))
-            fund_label = str(chosen_fund.get("name", "")).strip()
-
-            if paired_potency:
-                chosen.append(paired_potency)
-                new_gp += (to_gp(paired_potency.get("price_text")) or 0.0)
-                new_rarity = bump_rarity(new_rarity, (paired_potency.get("rarity") or "Common"))
-                potency = max(potency, parse_potency_rank(paired_potency.get("name")))
-                fund_label = _format_fundamental_pair_label(paired_potency, chosen_fund)
-
+            potency = parse_potency_rank(potency_rune.get("name"))
+            fund_label = str(potency_rune.get("name", "")).strip()
             fused["_rune_fund_label"] = fund_label
-            break
 
-        # --- PROPERTIES (probabilistic gates per rules) ---
-        if fund_label:
-            prop_labels: list[str] = []
-            if potency > 0 and rng.random() < prop_rate:
-                prop_cands = _property_candidates(all_runes, player_level, fused)
-                 
-                picked_names = set()
-                slots_taken = 0
-                for _ in range(potency):
-                    if rng.random() >= per_slot:
-                        continue
-                    pool = [r for r in prop_cands if r.get("name") not in picked_names]
-                    if not pool:
-                        break
-                    r = pool[rng.randint(0, len(pool) - 1)]
-                    picked_names.add(r.get("name"))
-                    chosen.append(r)
-                    new_gp += (to_gp(r.get("price_text")) or 0.0)
-                    new_rarity = bump_rarity(new_rarity, (r.get("rarity") or "Common"))
-                    prop_labels.append(str(r.get("name", "")).strip())
-                    slots_taken += 1
-                    if slots_taken >= potency:
-                        break
+            if potency > 0 and rng.random() < pair_rate:
+                prop_cands = _weapon_fundamental_property_candidates(
+                    all_runes,
+                    potency_rank=potency,
+                    party_level=player_level,
+                )
+                prop_rune = _pick_best_fundamental_property(prop_cands, potency, rng)
+                if prop_rune:
+                    chosen.append(prop_rune)
+                    new_gp += (to_gp(prop_rune.get("price_text")) or 0.0)
+                    new_rarity = bump_rarity(new_rarity, (prop_rune.get("rarity") or "Common"))
+                    fused["_rune_fund_label"] = _format_fundamental_pair_label(
+                        potency_rune, prop_rune
+                    )
 
-            # Store property labels ONCE, after the loop finishes
-            if prop_labels:
-                fused["_rune_prop_labels"] = prop_labels
+                prop_rune = _pick_best_fundamental_property(prop_cands, potency, rng)
+                if prop_rune:
+                    chosen.append(prop_rune)
+                    new_gp += (to_gp(prop_rune.get("price_text")) or 0.0)
+                    new_rarity = bump_rarity(new_rarity, (prop_rune.get("rarity") or "Common"))
+                    fused["_rune_fund_label"] = _format_fundamental_pair_label(
+                        potency_rune, prop_rune
+                    )
+
+            picked_names = set()
+            slots_taken = 0
+            for _ in range(potency):
+                if rng.random() >= per_slot:
+                    continue
+                pool = [r for r in prop_cands if r.get("name") not in picked_names]
+                if not pool:
+                    break
+                r = pool[rng.randint(0, len(pool) - 1)]
+                picked_names.add(r.get("name"))
+                chosen.append(r)
+                new_gp += (to_gp(r.get("price_text")) or 0.0)
+                new_rarity = bump_rarity(new_rarity, (r.get("rarity") or "Common"))
+                prop_labels.append(str(r.get("name", "")).strip())
+                slots_taken += 1
+                if slots_taken >= potency:
+                    break
+
+        # Store property labels ONCE, after the loop finishes
+        if prop_labels:
+            fused["_rune_prop_labels"] = prop_labels
 
     # LEVEL = max(base, any chosen rune levels)
     try:
@@ -1729,9 +1785,12 @@ def apply_armor_runes(
         return fused
 
     rcfg = (rune_cfg or {}) if rune_cfg is not None else (CONFIG.get("runes", {}) or {})
-    fund_rate = float((rcfg.get("fundamental") or {}).get("apply_rate", 1.0))
-    prop_rate = float((rcfg.get("property")    or {}).get("apply_rate", 0.6))
-    per_slot  = float((rcfg.get("property")    or {}).get("per_slot_rate", 0.7))
+    fund_cfg = (rcfg.get("fundamental") or {}) if isinstance(rcfg, dict) else {}
+    fund_rate = float(fund_cfg.get("apply_rate", 1.0))
+    pair_rate = float(fund_cfg.get("property_pair_rate", 0.6))
+    prop_cfg = (rcfg.get("property") or {}) if isinstance(rcfg, dict) else {}
+    prop_rate = float(prop_cfg.get("apply_rate", 0.6))
+    per_slot  = float(prop_cfg.get("per_slot_rate", 0.7))
 
     armor_level = int(fused.get("level") or 0)
     base_rarity = (fused.get("rarity") or "Common").strip().title()
@@ -1742,41 +1801,59 @@ def apply_armor_runes(
     chosen: list[dict] = []
 
     # FUNDAMENTAL
-    chosen_fund = None
+    potency = 0
+    potency_rune = None
     if rng.random() < fund_rate:
         fund_cands  = _fundamental_candidates_armor(all_runes, armor_level, player_level)
-        chosen_fund = _weighted_pick_fundamental(fund_cands, rng, rcfg)
-        if chosen_fund:
-            chosen.append(chosen_fund)
-            new_gp     += (to_gp(chosen_fund.get("price_text")) or 0.0)
-            new_rarity  = bump_rarity(new_rarity, (chosen_fund.get("rarity") or "Common"))
-            fused["_rune_fund_label"] = str(chosen_fund.get("name", "")).strip()
+        potency_cands = [r for r in fund_cands if parse_potency_rank(r.get("name")) >= 1]
+        potency_rune = _weighted_pick_fundamental(potency_cands, rng, rcfg)
+        if potency_rune:
+            chosen.append(potency_rune)
+            new_gp     += (to_gp(potency_rune.get("price_text")) or 0.0)
+            new_rarity  = bump_rarity(new_rarity, (potency_rune.get("rarity") or "Common"))
 
-            potency = parse_potency_rank(chosen_fund.get("name"))  # 1..3
+            potency = parse_potency_rank(potency_rune.get("name"))  # 1..3
+            fused["_rune_fund_label"] = str(potency_rune.get("name", "")).strip()
 
-            # PROPERTIES
-            prop_labels: list[str] = []
-            if potency > 0 and rng.random() < prop_rate:
-                prop_cands = _property_candidates_armor(all_runes, player_level, fused)
-                picked_names = set()
-                slots_taken = 0
-                for _ in range(potency):
-                    if rng.random() >= per_slot:
-                        continue
-                    pool = [r for r in prop_cands if r.get("name") not in picked_names]
-                    if not pool:
-                        break
-                    r = pool[rng.randint(0, len(pool) - 1)]
-                    picked_names.add(r.get("name"))
-                    chosen.append(r)
-                    new_gp     += (to_gp(r.get("price_text")) or 0.0)
-                    new_rarity  = bump_rarity(new_rarity, (r.get("rarity") or "Common"))
-                    prop_labels.append(str(r.get("name", "")).strip())
-                    slots_taken += 1
-                    if slots_taken >= potency:
-                        break
-            if prop_labels:
-                fused["_rune_prop_labels"] = prop_labels
+            if potency > 0 and rng.random() < pair_rate:
+                prop_cands = _armor_fundamental_property_candidates(
+                    all_runes,
+                    potency_rank=potency,
+                    party_level=player_level,
+                )
+                prop_rune = _pick_best_fundamental_property(prop_cands, potency, rng)
+                if prop_rune:
+                    chosen.append(prop_rune)
+                    new_gp     += (to_gp(prop_rune.get("price_text")) or 0.0)
+                    new_rarity  = bump_rarity(new_rarity, (prop_rune.get("rarity") or "Common"))
+                    fused["_rune_fund_label"] = _format_fundamental_pair_label(
+                        potency_rune, prop_rune
+                    )
+
+    if potency_rune:
+        # PROPERTIES
+        prop_labels: list[str] = []
+        if potency > 0 and rng.random() < prop_rate:
+            prop_cands = _property_candidates_armor(all_runes, player_level, fused)
+            picked_names = set()
+            slots_taken = 0
+            for _ in range(potency):
+                if rng.random() >= per_slot:
+                    continue
+                pool = [r for r in prop_cands if r.get("name") not in picked_names]
+                if not pool:
+                    break
+                r = pool[rng.randint(0, len(pool) - 1)]
+                picked_names.add(r.get("name"))
+                chosen.append(r)
+                new_gp     += (to_gp(r.get("price_text")) or 0.0)
+                new_rarity  = bump_rarity(new_rarity, (r.get("rarity") or "Common"))
+                prop_labels.append(str(r.get("name", "")).strip())
+                slots_taken += 1
+                if slots_taken >= potency:
+                    break
+        if prop_labels:
+            fused["_rune_prop_labels"] = prop_labels
 
     # LEVEL bump
     try:
